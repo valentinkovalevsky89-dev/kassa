@@ -431,10 +431,10 @@ function fetchRate() {
     btn.innerHTML = '⟳ Рынок'; btn.disabled = false;
     updateCalcHint(); return;
   }
-  fetch('https://api.frankfurter.app/latest?from=' + fGc.toUpperCase() + '&to=' + fRc.toUpperCase())
+  fetch('https://open.er-api.com/v6/latest/' + fGc.toUpperCase())
     .then(function(r){ return r.json(); })
     .then(function(data) {
-      var rate = data.rates && data.rates[fRc.toUpperCase()];
+      var rate = data && data.result === 'success' && data.rates && data.rates[fRc.toUpperCase()];
       if (!rate) throw new Error('нет данных');
       document.getElementById('rate').value = rate;
       src.textContent = '✓ рыночный · ' + nowTime();

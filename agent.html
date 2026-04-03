@@ -322,6 +322,7 @@ var AGENTS_PARAM = params.get('agents') || params.get('agent') || '';
 var ROLE         = params.get('role') || 'agent';
 var IS_OWNER     = (ROLE === 'owner' || ROLE === 'senior');
 var GS_URL       = params.get('gs') || localStorage.getItem('gs_url') || '';
+var AGENT_ID_URL = params.get('agentId') || params.get('aid') || '';
 var CURS = ['usdt','eur','huf','usd','czk'];
 var SYM  = {eur:'€', huf:'Ft', usdt:'USDT', usd:'$', czk:'Kč'};
 if (GS_URL) localStorage.setItem('gs_url', GS_URL);
@@ -357,6 +358,18 @@ function clearSentFromQueue() {
 function getSelectedAgent() {
   var sel = document.getElementById('agent-select');
   return sel ? sel.value : '';
+}
+function normalizeAgentStr(s) {
+  if (s === undefined || s === null) return '';
+  return String(s).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+/** Sheet may store display name (Зам) or id (a2) — match both */
+function dealAgentMatches(sheetAgent, myDisplayName) {
+  var sa = normalizeAgentStr(sheetAgent);
+  if (!sa) return false;
+  if (sa === normalizeAgentStr(myDisplayName)) return true;
+  if (AGENT_ID_URL && sa === normalizeAgentStr(AGENT_ID_URL)) return true;
+  return false;
 }
 function fmt(v, c) {
   if (c === 'huf' || c === 'czk') return Math.round(v).toLocaleString('ru') + ' ' + SYM[c];
@@ -655,7 +668,8 @@ function sendQueueDeal(id) {
     + '&usdtFromOwner=' + encodeURIComponent(d.usdtFromOwner ? '1' : '0')
     + '&note='       + encodeURIComponent(d.note)
     + '&date='       + encodeURIComponent(d.date)
-    + '&time='       + encodeURIComponent(d.time);
+    + '&time='       + encodeURIComponent(d.time)
+    + (AGENT_ID_URL ? '&agentId=' + encodeURIComponent(AGENT_ID_URL) : '');
   fetch(url, {mode: 'no-cors'})
     .then(function(){
       d.status = 'sent'; saveQueue(); renderQueue();
@@ -762,7 +776,7 @@ function loadBalance() {
 
     // 1. Deals — agent's own exchanges
     (results.deals || []).forEach(function(r) {
-      if ((r.agent || '').toLowerCase() !== agentName.toLowerCase()) return;
+      if (!dealAgentMatches(r.agent, agentName)) return;
       var gc = (r.givecur  || '').toLowerCase();
       var rc = (r.getcur   || '').toLowerCase();
       var ga = parseFloat(r.giveamount) || 0;
@@ -771,16 +785,19 @@ function loadBalance() {
       if (CURS2.indexOf(rc) !== -1) bal[rc] += ra;
     });
 
-    // 2. Transfers — agent gave or received funds
+    // 2. Transfers — agent gave or received funds (имя или agentId из ссылки)
     (results.transfers || []).forEach(function(r) {
-      var from = (r.fromAgent || '').toLowerCase();
-      var to   = (r.toAgent   || '').toLowerCase();
-      var me   = agentName.toLowerCase();
+      var from = normalizeAgentStr(r.fromAgent);
+      var to   = normalizeAgentStr(r.toAgent);
+      var me   = normalizeAgentStr(agentName);
+      var meId = normalizeAgentStr(AGENT_ID_URL);
       var cur  = (r.cur || '').toLowerCase();
       var amt  = parseFloat(r.amt) || 0;
       if (CURS2.indexOf(cur) === -1) return;
-      if (from === me) bal[cur] -= amt;
-      if (to   === me) bal[cur] += amt;
+      var hitFrom = from === me || (meId && from === meId);
+      var hitTo   = to   === me || (meId && to   === meId);
+      if (hitFrom) bal[cur] -= amt;
+      if (hitTo)   bal[cur] += amt;
     });
 
     // 3. Capital flows — only for owner role

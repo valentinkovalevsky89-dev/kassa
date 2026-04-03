@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+'л<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -495,16 +495,40 @@ function saveAgentCfg() {
   try { localStorage.setItem('agentCfg_v1', JSON.stringify(agentCfg)); } catch(e){}
 }
 
+// Normalize for matching agent field from Sheets / terminals (case, spaces)
+function normalizeAgentStr(s) {
+  if (s === undefined || s === null) return '';
+  return String(s).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Импорт GS: фильтр по id или имени (строка в Sheets может быть «Зам» или «a2») */
+function gsRowMatchesAgentFilter(r, filterVal) {
+  if (!filterVal) return true;
+  var cfg = getAgent(filterVal);
+  var aSheet = (r.agent || '').toString().trim();
+  var aIdCol = (r.agentid || r.agent_id || '').toString().trim();
+  if (normalizeAgentStr(aSheet) === normalizeAgentStr(filterVal)) return true;
+  if (aIdCol && normalizeAgentStr(aIdCol) === normalizeAgentStr(filterVal)) return true;
+  if (cfg) {
+    if (normalizeAgentStr(aSheet) === normalizeAgentStr(cfg.id)) return true;
+    if (normalizeAgentStr(aSheet) === normalizeAgentStr(cfg.name)) return true;
+    if (aIdCol && normalizeAgentStr(aIdCol) === normalizeAgentStr(cfg.id)) return true;
+  }
+  return false;
+}
+
 // Returns agent config by id, or null
 function getAgent(idOrName) {
   if (!idOrName) return null;
+  var n = normalizeAgentStr(idOrName);
+  if (!n) return null;
   // Check owner by id or name
-  if (idOrName === 'owner' || idOrName === agentCfg.ownerName) {
+  if (n === 'owner' || n === normalizeAgentStr(agentCfg.ownerName)) {
     return {id:'owner', name: agentCfg.ownerName, pct: ownerPct()};
   }
-  // Find by id first, then by name
-  return agentCfg.agents.find(function(a){ return a.id === idOrName; })
-      || agentCfg.agents.find(function(a){ return a.name === idOrName; })
+  // Find by id first, then by name (case-insensitive)
+  return agentCfg.agents.find(function(a){ return normalizeAgentStr(a.id) === n; })
+      || agentCfg.agents.find(function(a){ return normalizeAgentStr(a.name) === n; })
       || null;
 }
 // Sum of all agent %
@@ -2958,7 +2982,8 @@ function readDeals() {
     client:     ['client','клиент','имя'],
     note:       ['note','заметка','комментарий'],
     usdttoowner: ['usdttoowner','usdt_to_owner'],
-    usdtfromowner: ['usdtfromowner','usdt_from_owner']
+    usdtfromowner: ['usdtfromowner','usdt_from_owner'],
+    agentid: ['agentid','agent_id','id агента']
   };
 
   function findCol(key) {
@@ -3117,7 +3142,13 @@ document.getElementById('btn-term-links').addEventListener('click', function() {
     var params = 'agents=' + encodeURIComponent(agentsParam);
     if (agent.isOwner) params += '&role=owner';
     if (gsUrl) params += '&gs=' + encodeURIComponent(gsUrl);
-    params += '&v=64';
+    if (!agent.isOwner) {
+      var ag = agentCfg.agents.find(function(x){ return x.name === agent.name; });
+      if (ag && ag.id) params += '&agentId=' + encodeURIComponent(ag.id);
+    } else {
+      params += '&agentId=' + encodeURIComponent('owner');
+    }
+    params += '&v=66';
 
     var url = agentFile + '?' + params;
 
@@ -3297,7 +3328,7 @@ function processGsRows(rows) {
   gsPreviewDeals = [];
 
   rows.forEach(function(r) {
-    if (agentFilter && r.agent.toUpperCase() !== agentFilter.toUpperCase()) return;
+    if (agentFilter && !gsRowMatchesAgentFilter(r, agentFilter)) return;
 
     var gc = normCur(r.givecur);
     var rc = normCur(r.getcur);
@@ -3357,7 +3388,11 @@ function processGsRows(rows) {
         giveCur: gc, giveAmount: ga,
         getCur:  rc, getAmount:  ra,
         rate: rt, profit: profit, pct: pct,
-        agent: r.agent || 'A1',
+        agent: (function(){
+          var aid = (r.agentid || r.agent_id || '').toString().trim();
+          if (aid) return aid;
+          return (r.agent || '').trim() || 'owner';
+        })(),
         client: r.client || '',
         note: r.note || '',
         usdtToOwner:   String(r.usdttoowner || '').toLowerCase() === '1' || String(r.usdttoowner || '').toLowerCase() === 'true',

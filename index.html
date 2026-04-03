@@ -2631,27 +2631,59 @@ setTimeout(function autoLoadOnStartup() {
   var url = localStorage.getItem('gs_url');
   if (!url) return;
 
-  // — Auto-load deals badge —
+  // — Auto-load deals and merge into exState (same as transfers) —
   var cbDeals = 'gsAutoLoad_' + Date.now();
   var s1 = document.createElement('script');
   window[cbDeals] = function(data) {
     delete window[cbDeals];
     if (document.body.contains(s1)) document.body.removeChild(s1);
-    if (!data.ok || !data.rows) return;
+    if (!data.ok || !data.rows || !data.rows.length) return;
     var existingIds = new Set(exState.deals.map(function(d){ return d._gsRow; }).filter(Boolean));
-    var newCount = 0;
+    var newDeals = [];
     data.rows.forEach(function(r) {
-      if (!existingIds.has(r._row)) {
-        var gc = normCur(r.givecur), rc = normCur(r.getcur);
-        var ga = parseFloat(r.giveamount), ra = parseFloat(r.getamount), rt = parseFloat(r.rate);
-        var valid = CURS.indexOf(gc)!==-1 && CURS.indexOf(rc)!==-1 && gc!==rc && ga>0 && ra>0 && rt>0;
-        if (valid) newCount++;
+      if (existingIds.has(r._row)) return;
+      var gc = normCur(r.givecur), rc = normCur(r.getcur);
+      var ga = parseFloat(r.giveamount), ra = parseFloat(r.getamount), rt = parseFloat(r.rate);
+      var valid = CURS.indexOf(gc)!==-1 && CURS.indexOf(rc)!==-1 && gc!==rc && ga>0 && ra>0 && rt>0;
+      if (!valid) return;
+      // Normalise rate direction so ra ≈ ga*rt
+      var mv1 = ga * rt, mv2 = ga / rt;
+      var mv;
+      if (Math.abs(mv1 - ra) <= Math.abs(mv2 - ra)) { mv = mv1; } else { mv = mv2; rt = 1/rt; }
+      var profit = ra - mv;
+      var pct = mv > 0 ? ((profit/mv)*100).toFixed(1) : '0.0';
+      // Parse date/time
+      var dateStr, timeStr;
+      if (r.date && /^\d{2}\.\d{2}/.test((r.date||'').toString().trim())) {
+        dateStr = r.date.toString().trim().substring(0, 5);
+        var dt2 = new Date(r.timestamp); timeStr = isNaN(dt2) ? '00:00' : dt2.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+      } else {
+        var dt = new Date(r.timestamp);
+        if (!isNaN(dt)) {
+          dateStr = String(dt.getDate()).padStart(2,'0')+'.'+String(dt.getMonth()+1).padStart(2,'0');
+          timeStr = dt.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
+        } else { dateStr = today(); timeStr = '00:00'; }
       }
+      var agentVal = (r.agentid || r.agent_id || '').toString().trim() || (r.agent || '').trim() || 'owner';
+      newDeals.push({
+        id: Date.now() + Math.random(),
+        _gsRow: r._row,
+        giveCur: gc, giveAmount: ga,
+        getCur:  rc, getAmount:  ra,
+        rate: rt, profit: profit, pct: pct,
+        agent: agentVal,
+        client: r.client || '',
+        note: r.note || '',
+        usdtToOwner: String(r.usdttoowner||'').toLowerCase()==='1'||String(r.usdttoowner||'').toLowerCase()==='true',
+        poolFlag: String(r.pool_flag||r.usdtfromowner||'').toLowerCase()==='1'||String(r.pool_flag||r.usdtfromowner||'').toLowerCase()==='true',
+        date: dateStr, time: timeStr
+      });
     });
-    if (newCount > 0) {
-      var gsBtn = document.getElementById('btn-gsheets');
-      gsBtn.innerHTML = '⬇ GS <span style="background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-size:9px;margin-left:3px;">+'+newCount+'</span>';
-      gsBtn.title = 'Есть ' + newCount + ' новых сделок в Google Sheets';
+    if (newDeals.length > 0) {
+      newDeals.sort(function(a,b){ return a.id - b.id; });
+      if (!exState.openRound2 && newDeals.length > 0) autoOpenRound(newDeals[0]);
+      newDeals.forEach(function(d){ exState.deals.push(d); });
+      rebuildRounds(); save(); renderExchange();
     }
   };
   s1.onerror = function() { delete window[cbDeals]; if (document.body.contains(s1)) document.body.removeChild(s1); };
@@ -2901,6 +2933,10 @@ function doGet(e) {
     result = readTransfers();
   } else if (action === 'capital') {
     result = readCapital();
+  } else if (action === 'cashflow') {
+    result = writeCashflow(e.parameter);
+  } else if (action === 'submit') {
+    result = writeDeal(e.parameter);
   } else {
     result = readDeals();
   }
@@ -2964,6 +3000,62 @@ function doPost(e) {
   return ContentService
     .createTextOutput(JSON.stringify({ ok: true }))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function writeCashflow(p) {
+  try {
+    var ss    = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Капитал');
+    if (!sheet) {
+      sheet = ss.insertSheet('Капитал');
+      sheet.appendRow(['Timestamp','Дата','Время','Тип','Сумма','Валюта','Заметка','Агент']);
+    }
+    var type = (p.cfType === 'in') ? 'Пополнение' : 'Вывод';
+    sheet.appendRow([
+      new Date(),
+      p.date    || '',
+      p.time    || '',
+      type,
+      parseFloat(p.cfAmt) || 0,
+      (p.cfCur  || '').toLowerCase(),
+      p.cfNote  || '',
+      p.agent   || ''
+    ]);
+    return { ok: true };
+  } catch(err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+function writeDeal(p) {
+  try {
+    var ss     = SpreadsheetApp.getActiveSpreadsheet();
+    var dSheet = ss.getSheetByName('Deals')
+              || ss.getSheetByName('Сделки')
+              || ss.getSheetByName('Form responses 1');
+    if (!dSheet) {
+      dSheet = ss.insertSheet('Сделки');
+      dSheet.appendRow(['Timestamp','agent','giveCur','giveAmount','getCur','getAmount','rate','pool_flag','usdtToOwner','note','date','time','agentId']);
+    }
+    dSheet.appendRow([
+      new Date(),
+      p.agent       || '',
+      p.giveCur     || '',
+      parseFloat(p.giveAmount) || 0,
+      p.getCur      || '',
+      parseFloat(p.getAmount)  || 0,
+      parseFloat(p.rate)       || 0,
+      p.pool_flag   || '0',
+      p.usdtToOwner || '0',
+      p.note        || '',
+      p.date        || '',
+      p.time        || '',
+      p.agentId     || ''
+    ]);
+    return { ok: true };
+  } catch(err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 function readDeals() {

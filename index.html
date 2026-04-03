@@ -657,7 +657,8 @@ function load() {
     (exState.cashflows || []).forEach(function(cf){ cf.date = fixDate(cf.date); });
     (exState.attributionPools || []).forEach(function(p){ p.date = fixDate(p.date); });
     (exState.deals || []).forEach(function(d){
-      if (d.usdtFromOwner === undefined) d.usdtFromOwner = false;
+      // migrate old field names to poolFlag
+      if (d.poolFlag === undefined) d.poolFlag = !!(d.usdtFromOwner);
       if (d.usdtToOwner === undefined) d.usdtToOwner = false;
     });
   } catch(e) {
@@ -1558,7 +1559,7 @@ function addExDeal() {
     id:Date.now(), giveCur:gc, giveAmount:ga, getCur:rc, getAmount:ra,
     rate:rt, profit:profit, pct:pct, agent:agent, client:client, note:note,
     date:today(), time:now(),
-    usdtToOwner:false, usdtFromOwner:false
+    usdtToOwner:false, poolFlag:false
   };
 
   // Auto-open round on first deal if no round is open
@@ -1643,7 +1644,7 @@ function rebuildRounds() {
       actingId === attrPartnerId &&
       d.giveCur === 'usdt' &&
       d.getCur !== 'usdt' &&
-      !!d.usdtFromOwner;
+      !!d.poolFlag;
 
     // Create attribution pool when co-owner buys non-USDT with owner's USDT
     if (isPoolCreation && d.getAmount > 0 && d.giveAmount > 0) {
@@ -2739,7 +2740,7 @@ setTimeout(function autoLoadOnStartup() {
     <div id="gs-step-config">
       <div class="modal-hint">
         <b>Как настроить (один раз):</b><br>
-        1. Создай Google Form с полями: <code>giveCur, giveAmount, getCur, getAmount, rate, agent, client, usdtToOwner, usdtFromOwner, note</code><br>
+        1. Создай Google Form с полями: <code>giveCur, giveAmount, getCur, getAmount, rate, agent, client, pool_flag, usdtToOwner, note, agentId</code><br>
         2. Открой связанную таблицу → Расширения → Apps Script<br>
         3. Вставь скрипт-прокси (кнопка ниже) и задеплой как Web App (<i>Anyone</i>)<br>
         4. Скопируй URL деплоя и вставь сюда ↓<br>
@@ -2941,21 +2942,22 @@ function doPost(e) {
     var dSheet = ss.getSheetByName('Deals') || ss.getSheetByName('Form responses 1');
     if (!dSheet) {
       dSheet = ss.insertSheet('Deals');
-      dSheet.appendRow(['Timestamp','agent','giveCur','giveAmount','getCur','getAmount','rate','usdtToOwner','usdtFromOwner','note','date','time']);
+      dSheet.appendRow(['Timestamp','agent','giveCur','giveAmount','getCur','getAmount','rate','pool_flag','usdtToOwner','note','date','time','agentId']);
     }
     dSheet.appendRow([
       new Date(),
-      params.agent      || '',
-      params.giveCur    || '',
-      params.giveAmount || '',
-      params.getCur     || '',
-      params.getAmount  || '',
-      params.rate       || '',
-      params.usdtToOwner || '',
-      params.usdtFromOwner || '',
-      params.note       || '',
-      params.date       || '',
-      params.time       || ''
+      params.agent       || '',
+      params.giveCur     || '',
+      params.giveAmount  || '',
+      params.getCur      || '',
+      params.getAmount   || '',
+      params.rate        || '',
+      params.pool_flag   || '0',
+      params.usdtToOwner || '0',
+      params.note        || '',
+      params.date        || '',
+      params.time        || '',
+      params.agentId     || ''
     ]);
   }
 
@@ -2966,7 +2968,9 @@ function doPost(e) {
 
 function readDeals() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Deals') || ss.getSheetByName('Form responses 1');
+  var sheet = ss.getSheetByName('Deals')
+           || ss.getSheetByName('Сделки')
+           || ss.getSheetByName('Form responses 1');
   if (!sheet) return { ok: false, error: 'Лист Deals не найден' };
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return { ok: true, rows: [] };
@@ -2981,9 +2985,9 @@ function readDeals() {
     agent:      ['agent','агент'],
     client:     ['client','клиент','имя'],
     note:       ['note','заметка','комментарий'],
-    usdttoowner: ['usdttoowner','usdt_to_owner'],
-    usdtfromowner: ['usdtfromowner','usdt_from_owner'],
-    agentid: ['agentid','agent_id','id агента']
+    pool_flag:    ['pool_flag','poolflag','пул'],
+    usdttoowner:  ['usdttoowner','usdt_to_owner'],
+    agentid:      ['agentid','agent_id','id агента']
   };
 
   function findCol(key) {
@@ -3395,8 +3399,9 @@ function processGsRows(rows) {
         })(),
         client: r.client || '',
         note: r.note || '',
-        usdtToOwner:   String(r.usdttoowner || '').toLowerCase() === '1' || String(r.usdttoowner || '').toLowerCase() === 'true',
-        usdtFromOwner: String(r.usdtfromowner || '').toLowerCase() === '1' || String(r.usdtfromowner || '').toLowerCase() === 'true',
+        usdtToOwner: String(r.usdttoowner || '').toLowerCase() === '1' || String(r.usdttoowner || '').toLowerCase() === 'true',
+        // pool_flag — основной флаг пула; fallback на старое поле usdtFromOwner для обратной совместимости
+        poolFlag: String(r.pool_flag || r.usdtfromowner || '').toLowerCase() === '1' || String(r.pool_flag || r.usdtfromowner || '').toLowerCase() === 'true',
         date: dateStr, time: timeStr
       }
     });

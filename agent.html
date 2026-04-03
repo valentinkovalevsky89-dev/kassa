@@ -571,8 +571,8 @@ document.getElementById('btn-add-queue').addEventListener('click', function() {
   var mv = ga * rt;
   var profit = ra - mv;
   var pct = mv > 0 ? ((profit / mv) * 100).toFixed(2) : '0.00';
-  var usdtToOwner   = rc === 'usdt' && !IS_OWNER && document.getElementById('usdt-to-owner').checked;
-  var usdtFromOwner = gc === 'usdt' && !IS_OWNER && document.getElementById('usdt-from-owner').checked;
+  var usdtToOwner = rc === 'usdt' && !IS_OWNER && document.getElementById('usdt-to-owner').checked;
+  var poolFlag    = gc === 'usdt' && !IS_OWNER && document.getElementById('usdt-from-owner').checked;
   dealQueue.push({
     id: Date.now() + Math.random(),
     agent: getSelectedAgent(),
@@ -581,8 +581,8 @@ document.getElementById('btn-add-queue').addEventListener('click', function() {
     rate: rt, profit: profit, pct: pct,
     note: note, date: today(), time: nowTime(),
     status: 'pending',
-    usdtToOwner:   usdtToOwner,
-    usdtFromOwner: usdtFromOwner
+    usdtToOwner: usdtToOwner,
+    poolFlag:    poolFlag
   });
   document.getElementById('give-amt').value = '';
   document.getElementById('get-amt').value  = '';
@@ -664,8 +664,8 @@ function sendQueueDeal(id) {
     + '&getCur='     + encodeURIComponent(d.getCur)
     + '&getAmount='  + encodeURIComponent(d.getAmount)
     + '&rate='       + encodeURIComponent(d.rate)
-    + '&usdtToOwner='   + encodeURIComponent(d.usdtToOwner ? '1' : '0')
-    + '&usdtFromOwner=' + encodeURIComponent(d.usdtFromOwner ? '1' : '0')
+    + '&usdtToOwner=' + encodeURIComponent(d.usdtToOwner ? '1' : '0')
+    + '&pool_flag='   + encodeURIComponent(d.poolFlag   ? '1' : '0')
     + '&note='       + encodeURIComponent(d.note)
     + '&date='       + encodeURIComponent(d.date)
     + '&time='       + encodeURIComponent(d.time)
@@ -687,7 +687,7 @@ function sendQueueDeal(id) {
         }).catch(function(){});
         showToast('✓ Сделка + USDT → владельцу');
       // Auto-transfer USDT from owner if flagged (giveCur=USDT)
-      } else if (d.usdtFromOwner && d.giveCur === 'usdt' && GS_URL) {
+      } else if (d.poolFlag && d.giveCur === 'usdt' && GS_URL) {
         fetch(GS_URL, {
           method: 'POST', mode: 'no-cors',
           headers: {'Content-Type': 'application/json'},

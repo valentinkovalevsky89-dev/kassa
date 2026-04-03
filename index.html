@@ -671,14 +671,14 @@ function portfolioToUsdt(balances, rates) {
   return total;
 }
 
-// Fetch all rates vs USDT from Frankfurter and return promise {eur, huf, usd, czk}
+// Fetch all rates vs USDT from ER-API and return promise {eur, huf, usd, czk}
 function fetchAllRatesUsdt() {
-  // Frankfurter: get USD rates for EUR, HUF, CZK (USDT≈USD)
-  return fetch('https://api.frankfurter.app/latest?from=USD&to=EUR,HUF,CZK')
+  // ER-API: 1 USD = X CUR (USDT≈USD)
+  return fetch('https://open.er-api.com/v6/latest/USD')
     .then(function(r){ return r.json(); })
     .then(function(data) {
       var rates = data.rates || {};
-      // rates from Frankfurter are: 1 USD = X EUR, etc.
+      // rates are: 1 USD = X EUR, etc.
       // we need: 1 EUR = Y USDT, so invert
       return {
         usd: 1,
@@ -1308,7 +1308,7 @@ function updateRateLabel() {
 // ================================================================
 // AUTO RATE FETCH
 // ================================================================
-// Frankfurter covers: EUR, USD, HUF, CZK (fiat only)
+// ER-API covers: EUR, USD, HUF, CZK (fiat only)
 // CoinGecko covers: USDT vs fiat
 // "auto" = pick the right API based on the pair
 
@@ -1331,9 +1331,9 @@ function fetchRate() {
   lbl.textContent = 'Загрузка...';
 
   // Strategy:
-  // - USDT treated as USD (≈1:1) for Frankfurter
-  // - If both fiat: Frankfurter directly
-  // - If one side is USDT: substitute with USD in Frankfurter, result is the same rate
+  // - USDT treated as USD (≈1:1) for ER-API
+  // - If both fiat: ER-API directly
+  // - If one side is USDT: substitute with USD in ER-API, result is the same rate
   // - CoinGecko used only when explicitly selected
 
   if (src === 'coingecko') {
@@ -1341,7 +1341,7 @@ function fetchRate() {
     return;
   }
 
-  // For "auto" or "frankfurter": always use Frankfurter, substitute USDT→USD
+  // For "auto" or "frankfurter": use ER-API, substitute USDT→USD
   var fGc = gc === 'usdt' ? 'usd' : gc;
   var fRc = rc === 'usdt' ? 'usd' : rc;
 
@@ -1351,7 +1351,7 @@ function fetchRate() {
     return;
   }
 
-  fetchFrankfurter(fGc, fRc, gc === 'usdt' || rc === 'usdt' ? 'Frankfurter (USDT≈USD)' : 'Frankfurter');
+  fetchFrankfurter(fGc, fRc, gc === 'usdt' || rc === 'usdt' ? 'ER-API (USDT≈USD)' : 'ER-API');
 }
 
 function setRate(rate, source) {
@@ -1381,14 +1381,14 @@ function rateError(msg) {
 function fetchFrankfurter(gc, rc, label) {
   var base = gc.toUpperCase();
   var target = rc.toUpperCase();
-  var srcLabel = label || 'Frankfurter';
-  fetch('https://api.frankfurter.app/latest?from='+base+'&to='+target)
+  var srcLabel = label || 'ER-API';
+  fetch('https://open.er-api.com/v6/latest/' + base)
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if (d.rates && d.rates[target]) {
+      if (d && d.result === 'success' && d.rates && d.rates[target]) {
         setRate(parseFloat(d.rates[target].toFixed(6)), srcLabel);
       } else {
-        rateError('Frankfurter: нет данных для пары');
+        rateError('ER-API: нет данных для пары');
       }
     })
     .catch(function(){ rateError('Ошибка сети'); });

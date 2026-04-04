@@ -77,7 +77,47 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .spin{display:inline-block;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .hidden{display:none !important;}
-@media(max-width:480px){.main{padding:16px 12px 60px;}}
+@media(max-width:480px){.main{padding:16px 12px 80px;}}
+
+/* ── Bottom navigation ── */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--border);display:flex;z-index:20;padding-bottom:env(safe-area-inset-bottom,0);}
+.bnav-btn{flex:1;padding:10px 4px 8px;background:none;border:none;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;cursor:pointer;letter-spacing:.08em;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .2s;-webkit-tap-highlight-color:transparent;}
+.bnav-icon{font-size:18px;line-height:1;}
+.bnav-btn.active{color:var(--green);}
+.bnav-btn.active .bnav-icon{filter:drop-shadow(0 0 5px rgba(38,217,160,.6));}
+.bnav-indicator{position:absolute;top:0;left:50%;transform:translateX(-50%);width:28px;height:2px;background:var(--green);border-radius:0 0 2px 2px;opacity:0;transition:opacity .2s;}
+.bnav-btn.active .bnav-indicator{opacity:1;}
+.bottom-nav{position:fixed;} /* force stacking context */
+
+/* ── Tab panes ── */
+.tab-pane{animation:fadeIn .15s ease;}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* ── Swipe hint (mobile only) ── */
+@media(pointer:coarse){
+  .swipe-hint{display:flex;justify-content:center;gap:8px;margin-bottom:14px;}
+  .swipe-dot{width:6px;height:6px;border-radius:50%;background:var(--border);transition:background .2s;}
+  .swipe-dot.active{background:var(--green);}
+}
+@media(pointer:fine){.swipe-hint{display:none;}}
+
+/* ── History cards ── */
+.hist-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;}
+.hist-pair{font-size:13px;font-weight:700;margin-bottom:5px;display:flex;justify-content:space-between;align-items:flex-start;}
+.hist-profit{font-size:13px;font-weight:700;white-space:nowrap;margin-left:8px;}
+.hist-detail{font-size:10px;color:var(--muted);margin-bottom:2px;line-height:1.5;}
+.hist-detail b{color:var(--text);}
+.hist-badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
+.badge{display:inline-block;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
+.badge-pool{background:rgba(180,139,247,.2);color:var(--czk);}
+.badge-toowner{background:rgba(255,209,102,.2);color:var(--gold);}
+.badge-sent{background:rgba(38,217,160,.15);color:var(--green);}
+.badge-pending{background:rgba(74,88,120,.2);color:var(--muted);}
+.badge-error{background:rgba(255,92,122,.2);color:var(--red);}
+.badge-buy{background:rgba(180,139,247,.15);color:var(--czk);}
+.badge-sell{background:rgba(38,217,160,.15);color:var(--green);}
+.badge-conv{background:rgba(79,142,247,.15);color:var(--eur);}
+.hist-empty{text-align:center;padding:30px 20px;color:var(--muted);font-size:11px;border:1px dashed var(--border);border-radius:10px;}
 </style>
 </head>
 <body>
@@ -87,7 +127,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
   <div class="role-badge role-agent" id="role-badge">—</div>
 </div>
 
-<div class="main">
+<div class="main" id="main-swipe" style="padding-bottom:80px;">
 
   <div id="no-config-screen" class="no-config hidden">
     <div class="no-config-icon">🔒</div>
@@ -97,172 +137,53 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 
   <div id="main-screen">
 
-    <!-- МОЙ БАЛАНС -->
-    <div class="card" id="balance-card" style="display:none">
-      <div class="queue-header">
-        <div class="queue-title">Мой баланс</div>
-        <button class="rate-btn" id="btn-refresh-balance" style="padding:6px 12px;font-size:10px;">⟳</button>
-      </div>
-      <div id="balance-body">
-        <div style="color:var(--muted);font-size:11px;">Загрузка...</div>
-      </div>
-      <div id="balance-updated" style="font-size:9px;color:var(--muted);margin-top:8px;"></div>
+    <!-- ═══ ТОЧКИ-ИНДИКАТОР ВКЛАДОК (мобильный) ═══ -->
+    <div class="swipe-hint" id="swipe-dots">
+      <div class="swipe-dot active" data-dot="0"></div>
+      <div class="swipe-dot" data-dot="1"></div>
+      <div class="swipe-dot" data-dot="2"></div>
     </div>
 
-    <!-- КАЛЬКУЛЯТОР -->
-    <div class="card">
-      <div class="card-title">Калькулятор сделки</div>
+    <!-- ═══ ВКЛАДКА 0: СДЕЛКА ═══ -->
+    <div id="tab-deal" class="tab-pane">
 
-      <div class="field" style="margin-bottom:14px;">
-        <label>Агент</label>
-        <select id="agent-select" style="font-size:14px;font-weight:700;color:var(--green);"></select>
-      </div>
-
-      <div class="row3">
-        <div class="field">
-          <label>Отдаю</label>
-          <input type="number" id="give-amt" placeholder="10000" inputmode="decimal">
+      <!-- МОЙ БАЛАНС -->
+      <div class="card" id="balance-card" style="display:none">
+        <div class="queue-header">
+          <div class="queue-title">Мой баланс</div>
+          <button class="rate-btn" id="btn-refresh-balance" style="padding:6px 12px;font-size:10px;">⟳</button>
         </div>
-        <div class="arrow">→</div>
-        <div class="field">
-          <label>Получаю</label>
-          <input type="number" id="get-amt" placeholder="9200" inputmode="decimal">
+        <div id="balance-body">
+          <div style="color:var(--muted);font-size:11px;">Загрузка...</div>
         </div>
+        <div id="balance-updated" style="font-size:9px;color:var(--muted);margin-top:8px;"></div>
       </div>
 
-      <div class="row2">
-        <div class="field">
-          <label>Валюта отдаю</label>
-          <select id="give-cur">
-            <option value="usdt">USDT</option>
-            <option value="eur">EUR</option>
-            <option value="huf">HUF</option>
-            <option value="usd">USD</option>
-            <option value="czk">CZK</option>
-          </select>
+      <!-- КАЛЬКУЛЯТОР -->
+      <div class="card">
+        <div class="card-title">Калькулятор сделки</div>
+
+        <div class="field" style="margin-bottom:14px;">
+          <label>Агент</label>
+          <select id="agent-select" style="font-size:14px;font-weight:700;color:var(--green);"></select>
         </div>
-        <div class="field">
-          <label>Валюта получаю</label>
-          <select id="get-cur">
-            <option value="eur">EUR</option>
-            <option value="usdt">USDT</option>
-            <option value="huf">HUF</option>
-            <option value="usd">USD</option>
-            <option value="czk">CZK</option>
-          </select>
+
+        <div class="row3">
+          <div class="field">
+            <label>Отдаю</label>
+            <input type="number" id="give-amt" placeholder="10000" inputmode="decimal">
+          </div>
+          <div class="arrow">→</div>
+          <div class="field">
+            <label>Получаю</label>
+            <input type="number" id="get-amt" placeholder="9200" inputmode="decimal">
+          </div>
         </div>
-      </div>
 
-      <div class="rate-row">
-        <div class="field">
-          <label id="rate-lbl">Курс сделки (1 USDT = ? EUR)</label>
-          <input type="number" id="rate" placeholder="0.8600" step="any" inputmode="decimal">
-        </div>
-        <button class="rate-btn" id="btn-fetch-rate">⟳ Рынок</button>
-      </div>
-      <div class="rate-src" id="rate-src"></div>
-
-      <div class="calc-hint" id="calc-hint">
-        <div>
-          <div class="calc-hint-label">Профит от сделки</div>
-          <div style="color:var(--muted);font-size:11px;margin-top:3px;">введи суммы и курс</div>
-        </div>
-      </div>
-
-      <!-- Спред + автосчёт -->
-      <div class="row2" style="margin-bottom:0;">
-        <div class="field">
-          <label>Спред %</label>
-          <input type="number" id="spread" placeholder="2.0" step="0.1" inputmode="decimal">
-        </div>
-        <div class="field">
-          <label id="profit-lbl">Профит</label>
-          <div id="profit-display" style="padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:9px;font-size:13px;font-weight:700;color:var(--muted);">—</div>
-        </div>
-      </div>
-
-      <div class="field" style="margin-bottom:14px;margin-top:12px;">
-        <label>Клиент / заметка</label>
-        <input type="text" id="note" placeholder="@username или комментарий">
-      </div>
-
-      <!-- getCur=USDT: по умолчанию включена — USDT идут владельцу -->
-      <div id="usdt-to-owner-row" style="display:none;margin-bottom:8px;background:rgba(255,209,102,.08);border:1px solid rgba(255,209,102,.25);border-radius:8px;padding:10px 12px;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--gold);">
-          <input type="checkbox" id="usdt-to-owner" checked style="width:16px;height:16px;accent-color:var(--gold);">
-          USDT передаю владельцу
-        </label>
-        <div style="font-size:10px;color:var(--muted);margin-top:4px;margin-left:24px;">По умолчанию включено — снять если оставляешь USDT себе</div>
-      </div>
-
-      <!-- giveCur=USDT: по умолчанию выключена — USDT берём у владельца -->
-      <div id="usdt-from-owner-row" style="display:none;margin-bottom:8px;background:rgba(180,139,247,.08);border:1px solid rgba(180,139,247,.25);border-radius:8px;padding:10px 12px;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--czk);">
-          <input type="checkbox" id="usdt-from-owner" style="width:16px;height:16px;accent-color:var(--czk);">
-          USDT беру у владельца
-        </label>
-        <div style="font-size:10px;color:var(--muted);margin-top:4px;margin-left:24px;">Включить если USDT идут с кошелька владельца — запишет transfer входящий</div>
-      </div>
-
-      <button class="btn btn-g" id="btn-add-queue">+ ДОБАВИТЬ В ОЧЕРЕДЬ</button>
-    </div>
-
-    <!-- ОЧЕРЕДЬ -->
-    <div class="card">
-      <div class="queue-header">
-        <div class="queue-title">Очередь сделок</div>
-        <div class="queue-count" id="queue-count">0</div>
-      </div>
-      <div id="queue-list">
-        <div class="queue-empty">Добавьте сделки выше</div>
-      </div>
-      <button class="btn btn-g hidden" id="btn-send-all" style="margin-top:10px;">✓ ОТПРАВИТЬ ВСЕ →</button>
-    </div>
-
-    <!-- ПЕРЕДАЧА (агенты) -->
-    <div class="card" id="transfer-card" style="display:none">
-      <div class="card-title" style="color:var(--czk);">↔ Передача средств</div>
-      <div class="field" style="margin-bottom:12px;">
-        <label>Кому передаю</label>
-        <select id="tr-to-agent" style="font-size:14px;font-weight:700;color:var(--czk);"></select>
-      </div>
-      <div class="row2">
-        <div class="field">
-          <label>Сумма</label>
-          <input type="number" id="tr-amt" placeholder="10000" inputmode="decimal">
-        </div>
-        <div class="field">
-          <label>Валюта</label>
-          <select id="tr-cur">
-            <option value="eur">EUR</option>
-            <option value="usdt">USDT</option>
-            <option value="huf">HUF</option>
-            <option value="usd">USD</option>
-            <option value="czk">CZK</option>
-          </select>
-        </div>
-      </div>
-      <div class="field" style="margin-bottom:14px;">
-        <label>Заметка</label>
-        <input type="text" id="tr-note" placeholder="покрытие разрыва, операционные...">
-      </div>
-      <button class="btn" id="btn-tr-submit" style="background:var(--czk);color:#070a10;font-weight:700;">ПЕРЕДАТЬ →</button>
-    </div>
-
-    <!-- КАПИТАЛ (владелец) -->
-    <div id="owner-panel" class="hidden">
-
-      <!-- Движение капитала -->
-      <div class="card owner-card">
-        <div class="card-title" style="color:var(--gold);">💰 Движение капитала</div>
         <div class="row2">
           <div class="field">
-            <label>Сумма</label>
-            <input type="number" id="cf-amt" placeholder="5000" inputmode="decimal">
-          </div>
-          <div class="field">
-            <label>Валюта</label>
-            <select id="cf-cur">
+            <label>Валюта отдаю</label>
+            <select id="give-cur">
               <option value="usdt">USDT</option>
               <option value="eur">EUR</option>
               <option value="huf">HUF</option>
@@ -270,32 +191,116 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
               <option value="czk">CZK</option>
             </select>
           </div>
+          <div class="field">
+            <label>Валюта получаю</label>
+            <select id="get-cur">
+              <option value="eur">EUR</option>
+              <option value="usdt">USDT</option>
+              <option value="huf">HUF</option>
+              <option value="usd">USD</option>
+              <option value="czk">CZK</option>
+            </select>
+          </div>
         </div>
-        <div class="field" style="margin-bottom:14px;">
-          <label>Заметка</label>
-          <input type="text" id="cf-note" placeholder="пополнение, вывод прибыли...">
+
+        <div class="rate-row">
+          <div class="field">
+            <label id="rate-lbl">Курс сделки (1 USDT = ? EUR)</label>
+            <input type="number" id="rate" placeholder="0.8600" step="any" inputmode="decimal">
+          </div>
+          <button class="rate-btn" id="btn-fetch-rate">⟳ Рынок</button>
         </div>
-        <div class="btn-row2">
-          <button class="btn btn-y" id="btn-cf-in">↑ Пополнение</button>
-          <button class="btn btn-r" id="btn-cf-out">↓ Вывод</button>
+        <div class="rate-src" id="rate-src"></div>
+
+        <div class="calc-hint" id="calc-hint">
+          <div>
+            <div class="calc-hint-label">Профит от сделки</div>
+            <div style="color:var(--muted);font-size:11px;margin-top:3px;">введи суммы и курс</div>
+          </div>
         </div>
+
+        <div class="row2" style="margin-bottom:0;">
+          <div class="field">
+            <label>Спред %</label>
+            <input type="number" id="spread" placeholder="2.0" step="0.1" inputmode="decimal">
+          </div>
+          <div class="field">
+            <label id="profit-lbl">Профит</label>
+            <div id="profit-display" style="padding:12px 14px;background:var(--bg);border:1px solid var(--border);border-radius:9px;font-size:13px;font-weight:700;color:var(--muted);">—</div>
+          </div>
+        </div>
+
+        <div class="field" style="margin-bottom:14px;margin-top:12px;">
+          <label>Клиент / заметка</label>
+          <input type="text" id="note" placeholder="@username или комментарий">
+        </div>
+
+        <!-- getCur=USDT: по умолчанию включена — USDT идут владельцу -->
+        <div id="usdt-to-owner-row" style="display:none;margin-bottom:8px;background:rgba(255,209,102,.08);border:1px solid rgba(255,209,102,.25);border-radius:8px;padding:10px 12px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--gold);">
+            <input type="checkbox" id="usdt-to-owner" checked style="width:16px;height:16px;accent-color:var(--gold);">
+            USDT передаю владельцу
+          </label>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px;margin-left:24px;">По умолчанию включено — снять если оставляешь USDT себе</div>
+        </div>
+
+        <!-- giveCur=USDT: по умолчанию выключена — USDT берём у владельца -->
+        <div id="usdt-from-owner-row" style="display:none;margin-bottom:8px;background:rgba(180,139,247,.08);border:1px solid rgba(180,139,247,.25);border-radius:8px;padding:10px 12px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--czk);">
+            <input type="checkbox" id="usdt-from-owner" style="width:16px;height:16px;accent-color:var(--czk);">
+            USDT беру у владельца
+          </label>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px;margin-left:24px;">Включить если USDT идут с кошелька владельца</div>
+        </div>
+
+        <button class="btn btn-g" id="btn-add-queue">+ ДОБАВИТЬ В ОЧЕРЕДЬ</button>
       </div>
 
-      <!-- Передача средств агенту -->
-      <div class="card owner-card">
+      <!-- ОЧЕРЕДЬ -->
+      <div class="card">
+        <div class="queue-header">
+          <div class="queue-title">Очередь сделок</div>
+          <div class="queue-count" id="queue-count">0</div>
+        </div>
+        <div id="queue-list">
+          <div class="queue-empty">Добавьте сделки выше</div>
+        </div>
+        <button class="btn btn-g hidden" id="btn-send-all" style="margin-top:10px;">✓ ОТПРАВИТЬ ВСЕ →</button>
+      </div>
+
+    </div><!-- /tab-deal -->
+
+    <!-- ═══ ВКЛАДКА 1: ИСТОРИЯ ═══ -->
+    <div id="tab-history" class="tab-pane hidden">
+      <div class="card">
+        <div class="queue-header">
+          <div class="queue-title">История сделок</div>
+          <button class="rate-btn" id="btn-refresh-history" style="padding:6px 12px;font-size:10px;">⟳</button>
+        </div>
+        <div id="history-list">
+          <div class="hist-empty">Нет сделок в очереди</div>
+        </div>
+      </div>
+    </div><!-- /tab-history -->
+
+    <!-- ═══ ВКЛАДКА 2: ПЕРЕДАЧА ═══ -->
+    <div id="tab-transfer" class="tab-pane hidden">
+
+      <!-- ПЕРЕДАЧА (агенты) -->
+      <div class="card" id="transfer-card" style="display:none">
         <div class="card-title" style="color:var(--czk);">↔ Передача средств</div>
         <div class="field" style="margin-bottom:12px;">
           <label>Кому передаю</label>
-          <select id="owner-tr-to-agent" style="font-size:14px;font-weight:700;color:var(--czk);"></select>
+          <select id="tr-to-agent" style="font-size:14px;font-weight:700;color:var(--czk);"></select>
         </div>
         <div class="row2">
           <div class="field">
             <label>Сумма</label>
-            <input type="number" id="owner-tr-amt" placeholder="5000" inputmode="decimal">
+            <input type="number" id="tr-amt" placeholder="10000" inputmode="decimal">
           </div>
           <div class="field">
             <label>Валюта</label>
-            <select id="owner-tr-cur">
+            <select id="tr-cur">
               <option value="eur">EUR</option>
               <option value="usdt">USDT</option>
               <option value="huf">HUF</option>
@@ -306,15 +311,96 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
         </div>
         <div class="field" style="margin-bottom:14px;">
           <label>Заметка</label>
-          <input type="text" id="owner-tr-note" placeholder="операционные, покрытие разрыва...">
+          <input type="text" id="tr-note" placeholder="покрытие разрыва, операционные...">
         </div>
-        <button class="btn" id="btn-owner-tr-submit" style="background:var(--czk);color:#070a10;font-weight:700;">ПЕРЕДАТЬ →</button>
+        <button class="btn" id="btn-tr-submit" style="background:var(--czk);color:#070a10;font-weight:700;">ПЕРЕДАТЬ →</button>
       </div>
 
-    </div>
+      <!-- КАПИТАЛ (владелец) -->
+      <div id="owner-panel" class="hidden">
 
-  </div>
-</div>
+        <div class="card owner-card">
+          <div class="card-title" style="color:var(--gold);">💰 Движение капитала</div>
+          <div class="row2">
+            <div class="field">
+              <label>Сумма</label>
+              <input type="number" id="cf-amt" placeholder="5000" inputmode="decimal">
+            </div>
+            <div class="field">
+              <label>Валюта</label>
+              <select id="cf-cur">
+                <option value="usdt">USDT</option>
+                <option value="eur">EUR</option>
+                <option value="huf">HUF</option>
+                <option value="usd">USD</option>
+                <option value="czk">CZK</option>
+              </select>
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:14px;">
+            <label>Заметка</label>
+            <input type="text" id="cf-note" placeholder="пополнение, вывод прибыли...">
+          </div>
+          <div class="btn-row2">
+            <button class="btn btn-y" id="btn-cf-in">↑ Пополнение</button>
+            <button class="btn btn-r" id="btn-cf-out">↓ Вывод</button>
+          </div>
+        </div>
+
+        <div class="card owner-card">
+          <div class="card-title" style="color:var(--czk);">↔ Передача средств</div>
+          <div class="field" style="margin-bottom:12px;">
+            <label>Кому передаю</label>
+            <select id="owner-tr-to-agent" style="font-size:14px;font-weight:700;color:var(--czk);"></select>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Сумма</label>
+              <input type="number" id="owner-tr-amt" placeholder="5000" inputmode="decimal">
+            </div>
+            <div class="field">
+              <label>Валюта</label>
+              <select id="owner-tr-cur">
+                <option value="eur">EUR</option>
+                <option value="usdt">USDT</option>
+                <option value="huf">HUF</option>
+                <option value="usd">USD</option>
+                <option value="czk">CZK</option>
+              </select>
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:14px;">
+            <label>Заметка</label>
+            <input type="text" id="owner-tr-note" placeholder="операционные, покрытие разрыва...">
+          </div>
+          <button class="btn" id="btn-owner-tr-submit" style="background:var(--czk);color:#070a10;font-weight:700;">ПЕРЕДАТЬ →</button>
+        </div>
+
+      </div><!-- /owner-panel -->
+
+    </div><!-- /tab-transfer -->
+
+  </div><!-- /main-screen -->
+</div><!-- /main -->
+
+<!-- ═══ BOTTOM NAV ═══ -->
+<nav class="bottom-nav" id="bottom-nav" style="display:none;">
+  <button class="bnav-btn active" data-tab="0" id="bnav-0">
+    <div class="bnav-indicator"></div>
+    <span class="bnav-icon">📝</span>
+    <span>СДЕЛКА</span>
+  </button>
+  <button class="bnav-btn" data-tab="1" id="bnav-1">
+    <div class="bnav-indicator"></div>
+    <span class="bnav-icon">📋</span>
+    <span>ИСТОРИЯ</span>
+  </button>
+  <button class="bnav-btn" data-tab="2" id="bnav-2">
+    <div class="bnav-indicator"></div>
+    <span class="bnav-icon">↔</span>
+    <span>ПЕРЕДАЧА</span>
+  </button>
+</nav>
 
 <script>
 var params       = new URLSearchParams(window.location.search);
@@ -420,6 +506,127 @@ if (!AGENTS_LIST.length || !GS_URL) {
   loadQueue();
   renderQueue();
   fetchRate();
+  document.getElementById('bottom-nav').style.display = '';
+}
+
+// ================================================================
+// TAB NAVIGATION + SWIPE
+// ================================================================
+var currentTab = 0;
+var TAB_IDS = ['tab-deal', 'tab-history', 'tab-transfer'];
+
+function switchTab(idx) {
+  TAB_IDS.forEach(function(id, i) {
+    var el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', i !== idx);
+  });
+  document.querySelectorAll('.bnav-btn').forEach(function(b) {
+    b.classList.toggle('active', parseInt(b.getAttribute('data-tab')) === idx);
+  });
+  document.querySelectorAll('.swipe-dot').forEach(function(d) {
+    d.classList.toggle('active', parseInt(d.getAttribute('data-dot')) === idx);
+  });
+  currentTab = idx;
+  if (idx === 1) renderHistory();
+}
+
+document.querySelectorAll('.bnav-btn').forEach(function(b) {
+  b.addEventListener('click', function() { switchTab(parseInt(this.getAttribute('data-tab'))); });
+});
+
+// Refresh history button
+var btnRefHist = document.getElementById('btn-refresh-history');
+if (btnRefHist) btnRefHist.addEventListener('click', renderHistory);
+
+// ── Swipe (touch) ──
+var _swX = 0, _swY = 0, _swActive = false;
+var swipeEl = document.getElementById('main-swipe');
+if (swipeEl) {
+  swipeEl.addEventListener('touchstart', function(e) {
+    _swX = e.touches[0].clientX;
+    _swY = e.touches[0].clientY;
+    _swActive = true;
+  }, {passive: true});
+
+  swipeEl.addEventListener('touchmove', function(e) {
+    if (!_swActive) return;
+    var dx = e.touches[0].clientX - _swX;
+    var dy = e.touches[0].clientY - _swY;
+    // If mostly vertical scroll — cancel swipe tracking
+    if (Math.abs(dy) > Math.abs(dx) * 1.5) _swActive = false;
+  }, {passive: true});
+
+  swipeEl.addEventListener('touchend', function(e) {
+    if (!_swActive) return;
+    _swActive = false;
+    var dx = e.changedTouches[0].clientX - _swX;
+    var dy = e.changedTouches[0].clientY - _swY;
+    // Require minimum horizontal distance and horizontal dominance
+    if (Math.abs(dx) < 55 || Math.abs(dy) > Math.abs(dx) * 0.75) return;
+    if (dx < 0 && currentTab < TAB_IDS.length - 1) switchTab(currentTab + 1);
+    if (dx > 0 && currentTab > 0) switchTab(currentTab - 1);
+  }, {passive: true});
+}
+
+// ── History render ──
+function renderHistory() {
+  var list = document.getElementById('history-list');
+  if (!list) return;
+  if (!dealQueue.length) {
+    list.innerHTML = '<div class="hist-empty">Нет сделок в очереди</div>';
+    return;
+  }
+  var h = '';
+  dealQueue.slice().reverse().forEach(function(d) {
+    var clientRate = d.giveAmount > 0 ? (d.getAmount / d.giveAmount) : 0;
+    var marketRate = d.rate;
+    var spread     = parseFloat(d.pct) || 0;
+    var profit     = d.profit;
+    var col  = profit >= 0 ? 'var(--green)' : 'var(--red)';
+    var sign = profit >= 0 ? '+' : '';
+
+    // Determine decimals by currency
+    var isRound = function(c){ return c === 'huf' || c === 'czk'; };
+    var mktFmt  = isRound(d.getCur) ? marketRate.toFixed(0)   : parseFloat(marketRate).toFixed(4);
+    var cliFmt  = isRound(d.getCur) ? clientRate.toFixed(0)   : clientRate.toFixed(4);
+
+    // Deal type tag
+    var typeTag = '';
+    if (d.giveCur === 'usdt')      typeTag = '<span class="badge badge-buy">покупка</span>';
+    else if (d.getCur === 'usdt')  typeTag = '<span class="badge badge-sell">продажа</span>';
+    else                           typeTag = '<span class="badge badge-conv">конвертация</span>';
+
+    // Status badge
+    var statusBadge = '';
+    if (d.status === 'sent')    statusBadge = '<span class="badge badge-sent">✓ отправлено</span>';
+    else if (d.status === 'error') statusBadge = '<span class="badge badge-error">✗ ошибка</span>';
+    else statusBadge = '<span class="badge badge-pending">ожидает</span>';
+
+    // Pool/owner badges
+    var poolBadge    = d.poolFlag    ? '<span class="badge badge-pool">👛 USDT владельца</span>' : '';
+    var toOwnerBadge = d.usdtToOwner ? '<span class="badge badge-toowner">→ владельцу</span>'   : '';
+
+    // Spread color
+    var spCol  = spread >= 0 ? 'var(--green)' : 'var(--red)';
+    var spSign = spread >= 0 ? '+' : '';
+
+    h += '<div class="hist-card">'
+      + '<div class="hist-pair">'
+      + '<span>'
+      + '<span class="tag t-' + d.giveCur + '">' + fmt(d.giveAmount, d.giveCur) + '</span>'
+      + ' → '
+      + '<span class="tag t-' + d.getCur + '">' + fmt(d.getAmount, d.getCur) + '</span>'
+      + '</span>'
+      + '<span class="hist-profit" style="color:' + col + '">' + sign + fmt(profit, d.getCur) + '</span>'
+      + '</div>'
+      + '<div class="hist-detail">📅 <b>' + d.date + ' ' + d.time + '</b> · ' + d.agent + (d.note ? ' · ' + d.note : '') + '</div>'
+      + '<div class="hist-detail">📊 Рыночный: <b>1 ' + d.giveCur.toUpperCase() + ' = ' + mktFmt + ' ' + d.getCur.toUpperCase() + '</b></div>'
+      + '<div class="hist-detail">💱 Клиентский: <b>1 ' + d.giveCur.toUpperCase() + ' = ' + cliFmt + ' ' + d.getCur.toUpperCase() + '</b>'
+      + ' · спред <span style="color:' + spCol + '">' + spSign + spread.toFixed(2) + '%</span></div>'
+      + '<div class="hist-badges">' + typeTag + statusBadge + poolBadge + toOwnerBadge + '</div>'
+      + '</div>';
+  });
+  list.innerHTML = h;
 }
 
 // RATE
@@ -557,6 +764,20 @@ document.getElementById('get-amt').addEventListener('input',  function(){ update
 document.getElementById('rate').addEventListener('input',     function(){ updateCalcHint('rate'); });
 document.getElementById('spread').addEventListener('input',   function(){ updateCalcHint('spread'); });
 
+// ── Reset form after adding deal (clears amounts/note only, preserves pair + checkbox states) ──
+function resetFormAfterAdd() {
+  document.getElementById('give-amt').value = '';
+  document.getElementById('get-amt').value  = '';
+  document.getElementById('note').value     = '';
+  document.getElementById('calc-hint').innerHTML =
+    '<div><div class="calc-hint-label">Профит от сделки</div>'
+    + '<div style="color:var(--muted);font-size:11px;margin-top:3px;">введи суммы и курс</div></div>';
+  document.getElementById('profit-display').textContent = '—';
+  document.getElementById('profit-display').style.color = 'var(--muted)';
+  // Checkbox states and visibility are intentionally NOT reset here —
+  // agent sets them once per session; they stay until currency pair changes.
+}
+
 // ADD TO QUEUE
 document.getElementById('btn-add-queue').addEventListener('click', function() {
   var ga   = parseFloat(document.getElementById('give-amt').value);
@@ -584,15 +805,9 @@ document.getElementById('btn-add-queue').addEventListener('click', function() {
     usdtToOwner: usdtToOwner,
     poolFlag:    poolFlag
   });
-  document.getElementById('give-amt').value = '';
-  document.getElementById('get-amt').value  = '';
-  document.getElementById('note').value     = '';
-  document.getElementById('usdt-to-owner').checked = false;
-  document.getElementById('usdt-from-owner').checked = false;
-  document.getElementById('calc-hint').innerHTML = '<div><div class="calc-hint-label">Профит от сделки</div>'
-    + '<div style="color:var(--muted);font-size:11px;margin-top:3px;">введи суммы и курс</div></div>';
   saveQueue();
   renderQueue();
+  resetFormAfterAdd();
   showToast('✓ Добавлено в очередь');
 });
 

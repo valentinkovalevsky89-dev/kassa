@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Unbounded:wght@400;700&display=swap" media="print" onload="this.media='all'">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -619,7 +618,8 @@ function freshExState() {
     deals:            [],
     cashflows:        [],
     attributionPools: [],  // [{id, sourceDealId, sourceAgent, cur, originalAmt, remainingAmt, costUsdtPerUnit}]
-    closedPools:      []   // fully consumed pools (history)
+    closedPools:      [],  // fully consumed pools (history)
+    poolLog:          []   // [{date, type, cur, amount, toCur, toAmount, profit, profit70, profit30, dealId, poolId}]
   };
 }
 
@@ -665,6 +665,7 @@ function load() {
     if (!exState.agentSpread)  exState.agentSpread  = {};
     if (!exState.attributionPools) exState.attributionPools = [];
     if (!exState.closedPools)  exState.closedPools  = [];
+    if (!exState.poolLog)      exState.poolLog      = [];
     ['eur','huf','usdt','usd','czk'].forEach(function(c){
       if(exState.balances[c]===undefined) exState.balances[c]=0;
       if(exState.profits[c]===undefined)  exState.profits[c]=0;
@@ -1651,6 +1652,7 @@ function rebuildRounds() {
   var livePools = [];
   var closedNow = [];
   var attrPartnerId = getAttrPartnerId();
+  var poolLog = [];
   function pushPool(pool) {
     if (!pool || !pool.cur || !pool.originalAmt || !pool.remainingAmt || !pool.costUsdtPerUnit) return;
     livePools.push(pool);
@@ -1682,6 +1684,13 @@ function rebuildRounds() {
         date: d.date,
         stage: 0
       });
+      poolLog.push({
+        type: 'created', date: d.date, time: d.time,
+        cur: d.getCur, amount: d.getAmount,
+        costUsdt: d.giveAmount, dealId: d.id,
+        poolId: 'pool_' + String(d.id),
+        agent: actingId
+      });
     }
 
     // Consume pool by currency FIFO from the sold currency
@@ -1707,11 +1716,19 @@ function rebuildRounds() {
           exState.agentProfit[attrPartnerId].usdt += realizedUsdt * 0.3;
           exState.agentSpread[attrPartnerId].usdt += realizedUsdt * 0.3;
         }
+        poolLog.push({
+          type: 'consumed', date: d.date, time: d.time,
+          cur: pool.cur, amount: covered,
+          receivedUsdt: coveredGetAmt, costUsdt: coveredCostUsdt,
+          profit: realizedUsdt, profit70: realizedUsdt * 0.7, profit30: realizedUsdt * 0.3,
+          dealId: d.id, poolId: pool.id, partial: covered < pool.remainingAmt + covered
+        });
       } else {
         // Pool migrates to new currency with same USDT cost basis
         if (coveredGetAmt > 0) {
+          var newPoolId = pool.id + '_mv_' + String(d.id) + '_' + i;
           pushPool({
-            id: pool.id + '_mv_' + String(d.id) + '_' + i,
+            id: newPoolId,
             sourceDealId: pool.sourceDealId || d.id,
             sourceAgent: pool.sourceAgent || attrPartnerId || 'owner',
             cur: d.getCur,
@@ -1721,12 +1738,23 @@ function rebuildRounds() {
             date: d.date,
             stage: (pool.stage || 0) + 1
           });
+          poolLog.push({
+            type: 'migrated', date: d.date, time: d.time,
+            cur: pool.cur, amount: covered,
+            toCur: d.getCur, toAmount: coveredGetAmt,
+            costUsdt: coveredCostUsdt, rate: d.rate,
+            dealId: d.id, poolId: pool.id, newPoolId: newPoolId
+          });
         }
       }
 
       pool.remainingAmt -= covered;
       remaining         -= covered;
       if (pool.remainingAmt <= 0.001) {
+        poolLog.push({
+          type: 'closed', date: d.date, time: d.time,
+          cur: pool.cur, dealId: d.id, poolId: pool.id
+        });
         closedNow.push(pool);
       }
     }
@@ -1747,6 +1775,7 @@ function rebuildRounds() {
   // Persist live pool state back (remainingAmt updated)
   exState.attributionPools = [];
   exState.closedPools = exState.closedPools || [];
+  exState.poolLog = poolLog;
   livePools.forEach(function(p) {
     if (p.remainingAmt > 0.001) {
       exState.attributionPools.push(p);
@@ -2351,15 +2380,181 @@ document.getElementById('btn-an-apply').addEventListener('click', function(){
   if (activeAnTab === 'rates') renderRatesChart(); else renderAnalytics();
 });
 document.getElementById('btn-an-pdf').addEventListener('click', function(){
-  var target = document.getElementById('analytics-capture');
-  if (!target || !window.html2canvas || !window.jspdf) return;
-  html2canvas(target, {backgroundColor:'#070a10', scale:2}).then(function(canvas){
-    var img = canvas.toDataURL('image/png');
-    var pdf = new window.jspdf.jsPDF('landscape', 'mm', 'a4');
-    var w = 277, h = canvas.height * w / canvas.width;
-    pdf.addImage(img, 'PNG', 10, 10, w, Math.min(h, 180));
-    pdf.save('business-tracker-analytics.pdf');
-  });
+  if (!window.jspdf) { alert('jsPDF не загружен'); return; }
+  var pdf = new window.jspdf.jsPDF('landscape', 'mm', 'a4');
+  var pw = 277, ph = 190, margin = 10;
+  var y = margin;
+
+  pdf.setFillColor(7, 10, 16);
+  pdf.rect(0, 0, 297, 210, 'F');
+  pdf.setTextColor(221, 228, 240);
+  pdf.setFontSize(13);
+  pdf.text('Business Tracker — Аналитика', margin, y + 5);
+  pdf.setFontSize(9);
+  pdf.setTextColor(74, 88, 120);
+  pdf.text(new Date().toLocaleDateString('ru'), margin, y + 11);
+  y += 18;
+
+  // KPI строки из DOM
+  var kpiEl = document.getElementById('an-kpi');
+  if (kpiEl) {
+    var kpiText = '';
+    kpiEl.querySelectorAll('.k').forEach(function(k) {
+      var l = (k.querySelector('.l') || {}).textContent || '';
+      var v = (k.querySelector('.v') || {}).textContent || '';
+      kpiText += l + ': ' + v + '   ';
+    });
+    if (kpiText.trim()) {
+      pdf.setFontSize(10); pdf.setTextColor(221, 228, 240);
+      pdf.text(kpiText.trim(), margin, y);
+      y += 8;
+    }
+  }
+
+  // P&L chart
+  var pnlCanvas = document.getElementById('an-profit-chart');
+  if (pnlCanvas && activeAnTab === 'pnl') {
+    try {
+      var pnlImg = pnlCanvas.toDataURL('image/jpeg', 0.92);
+      var cw = pnlCanvas.width, ch = pnlCanvas.height;
+      var maxW = pw - margin, maxH = 90;
+      var ratio = Math.min(maxW / cw, maxH / ch);
+      pdf.addImage(pnlImg, 'JPEG', margin, y, cw * ratio, ch * ratio);
+      y += ch * ratio + 6;
+    } catch(e) {}
+  }
+
+  // Rates chart
+  var ratesCanvas = document.getElementById('an-rates-chart');
+  if (ratesCanvas && activeAnTab === 'rates') {
+    try {
+      var rImg = ratesCanvas.toDataURL('image/jpeg', 0.92);
+      var rw = ratesCanvas.width, rh = ratesCanvas.height;
+      var maxW2 = pw - margin, maxH2 = 90;
+      var ratio2 = Math.min(maxW2 / rw, maxH2 / rh);
+      pdf.addImage(rImg, 'JPEG', margin, y, rw * ratio2, rh * ratio2);
+      y += rh * ratio2 + 6;
+    } catch(e) {}
+  }
+
+  // Metrics table text (для вкладки Курсы)
+  var metricsEl = document.getElementById('an-rates-metrics');
+  if (metricsEl && activeAnTab === 'rates' && y < ph) {
+    pdf.setFontSize(8); pdf.setTextColor(74, 88, 120);
+    metricsEl.querySelectorAll('tr').forEach(function(row) {
+      if (y >= ph) return;
+      var cells = row.querySelectorAll('th, td');
+      var line = Array.from(cells).map(function(c){ return c.textContent.trim(); }).join('   ');
+      pdf.text(line, margin, y);
+      y += 5;
+    });
+  }
+
+  // ── Страница 2: Пояснительная записка по атрибуционным пулам ──
+  var pLog = exState.poolLog || [];
+  if (pLog.length) {
+    pdf.addPage();
+    pdf.setFillColor(7, 10, 16);
+    pdf.rect(0, 0, 297, 210, 'F');
+
+    var py = margin + 6;
+    pdf.setFontSize(12); pdf.setTextColor(221, 228, 240);
+    pdf.text('Пояснительная записка — Атрибуционные пулы', margin, py);
+    py += 5;
+    pdf.setFontSize(8); pdf.setTextColor(74, 88, 120);
+    pdf.text('Автоматически сформировано на основе цепочек сделок', margin, py);
+    py += 8;
+
+    var fmtN = function(n, decimals) { return (Math.round(n * Math.pow(10, decimals || 0)) / Math.pow(10, decimals || 0)).toLocaleString('ru'); };
+    var iconMap = { created: '✦', migrated: '↔', consumed: '✅', closed: '●' };
+    var colorMap = {
+      created:  [38, 217, 160],
+      migrated: [90, 160, 255],
+      consumed: [255, 209, 70],
+      closed:   [74, 88, 120]
+    };
+
+    pLog.forEach(function(ev) {
+      if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
+
+      var col = colorMap[ev.type] || [221, 228, 240];
+      pdf.setTextColor(col[0], col[1], col[2]);
+      pdf.setFontSize(9);
+
+      var timeStr = (ev.date || '') + (ev.time ? ' ' + ev.time : '');
+      var icon = iconMap[ev.type] || '•';
+      var line = '';
+
+      if (ev.type === 'created') {
+        line = icon + ' [' + timeStr + ']  Создан пул: '
+          + fmtN(ev.amount, 0) + ' ' + (ev.cur || '').toUpperCase()
+          + '  (себестоимость: ' + fmtN(ev.costUsdt, 2) + ' USDT'
+          + ',  курс: ' + fmtN(ev.costUsdt / ev.amount, 4) + ' USDT/' + (ev.cur || '').toUpperCase() + ')';
+      } else if (ev.type === 'migrated') {
+        line = icon + ' [' + timeStr + ']  Пул мигрировал: '
+          + fmtN(ev.amount, 0) + ' ' + (ev.cur || '').toUpperCase()
+          + ' → ' + fmtN(ev.toAmount, 0) + ' ' + (ev.toCur || '').toUpperCase()
+          + '  (курс сделки: ' + fmtN(ev.rate, 4) + ',  база USDT сохранена: ' + fmtN(ev.costUsdt, 2) + ')';
+      } else if (ev.type === 'consumed') {
+        var sign70 = ev.profit70 >= 0 ? '+' : '';
+        var sign30 = ev.profit30 >= 0 ? '+' : '';
+        line = icon + ' [' + timeStr + ']  Пул продан в USDT: '
+          + fmtN(ev.amount, 0) + ' ' + (ev.cur || '').toUpperCase()
+          + ' → ' + fmtN(ev.receivedUsdt, 2) + ' USDT'
+          + '  |  Профит: ' + (ev.profit >= 0 ? '+' : '') + fmtN(ev.profit, 2) + ' USDT'
+          + '  (владелец ' + sign70 + fmtN(ev.profit70, 2) + ',  совладелец ' + sign30 + fmtN(ev.profit30, 2) + ')';
+      } else if (ev.type === 'closed') {
+        line = icon + ' [' + timeStr + ']  Пул закрыт: ' + (ev.cur || '').toUpperCase();
+      }
+
+      if (line) {
+        var maxLineWidth = 275;
+        var splitLines = pdf.splitTextToSize(line, maxLineWidth);
+        pdf.text(splitLines, margin, py);
+        py += splitLines.length * 5 + 2;
+      }
+    });
+
+    // Итого по пулам
+    var totalConsumed = pLog.filter(function(e){ return e.type === 'consumed'; });
+    if (totalConsumed.length) {
+      py += 4;
+      if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
+      pdf.setDrawColor(74, 88, 120);
+      pdf.line(margin, py - 2, 287, py - 2);
+      pdf.setFontSize(9); pdf.setTextColor(221, 228, 240);
+      var totProfit = totalConsumed.reduce(function(s, e){ return s + (e.profit || 0); }, 0);
+      var totOwner  = totalConsumed.reduce(function(s, e){ return s + (e.profit70 || 0); }, 0);
+      var totPartner= totalConsumed.reduce(function(s, e){ return s + (e.profit30 || 0); }, 0);
+      pdf.text(
+        'Итого по пулам:  профит ' + (totProfit >= 0 ? '+' : '') + fmtN(totProfit, 2) + ' USDT'
+        + '    владелец ' + (totOwner >= 0 ? '+' : '') + fmtN(totOwner, 2)
+        + '    совладелец ' + (totPartner >= 0 ? '+' : '') + fmtN(totPartner, 2),
+        margin, py
+      );
+    }
+
+    // Активные пулы на момент генерации
+    var activePools = exState.attributionPools || [];
+    if (activePools.length) {
+      py += 10;
+      if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
+      pdf.setFontSize(9); pdf.setTextColor(90, 160, 255);
+      pdf.text('Активные пулы (не закрыты):', margin, py);
+      py += 6;
+      activePools.forEach(function(p) {
+        if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
+        pdf.setFontSize(8); pdf.setTextColor(160, 180, 220);
+        var pline = '  • ' + fmtN(p.remainingAmt, 0) + ' ' + (p.cur || '').toUpperCase()
+          + '  (открыт: ' + (p.date || '—') + ',  база: ' + fmtN(p.costUsdtPerUnit, 4) + ' USDT/' + (p.cur || '').toUpperCase()
+          + ',  остаток от ' + fmtN(p.originalAmt, 0) + ')';
+        pdf.text(pline, margin, py);
+        py += 5;
+      });
+    }
+  }
+
+  pdf.save('business-tracker-analytics.pdf');
 });
 
 // ================================================================

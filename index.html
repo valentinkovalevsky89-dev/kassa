@@ -549,9 +549,16 @@ function getAgent(idOrName) {
     return {id:'owner', name: agentCfg.ownerName, pct: ownerPct()};
   }
   // Find by id first, then by name (case-insensitive)
-  return agentCfg.agents.find(function(a){ return normalizeAgentStr(a.id) === n; })
-      || agentCfg.agents.find(function(a){ return normalizeAgentStr(a.name) === n; })
-      || null;
+  var found = agentCfg.agents.find(function(a){ return normalizeAgentStr(a.id) === n; })
+           || agentCfg.agents.find(function(a){ return normalizeAgentStr(a.name) === n; });
+  if (found) return found;
+  // Fallback: if lookup value matches ATTR_PARTNER_FALLBACK ('a2') or any legacy short id,
+  // resolve to the attribution partner (agent with 30% or first non-owner agent)
+  if (n === normalizeAgentStr(ATTR_PARTNER_FALLBACK) || /^a\d+$/.test(n)) {
+    var byPct = agentCfg.agents.find(function(a){ return Math.abs((parseFloat(a.pct)||0) - 30) < 0.001; });
+    return byPct || (agentCfg.agents.length ? agentCfg.agents[0] : null);
+  }
+  return null;
 }
 // Sum of all agent %
 function sumAgentPct() {

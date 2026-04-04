@@ -1,4 +1,4 @@
-'л<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -430,25 +430,48 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 </div>
 
 <div class="modal-overlay hidden" id="analytics-modal">
-  <div class="modal" style="width:980px;max-width:96vw;">
+  <div class="modal" style="width:1060px;max-width:97vw;">
     <div class="modal-title">
       <button class="modal-close" id="analytics-close">✕</button>
-      📈 АНАЛИТИКА P&L
+      📈 АНАЛИТИКА
     </div>
+    <!-- Tab switcher -->
+    <div class="row" style="margin-bottom:10px;gap:4px;">
+      <button class="btn btn-g an-tab-btn active" data-tab="pnl">P&amp;L</button>
+      <button class="btn btn-o an-tab-btn" data-tab="rates">Курсы</button>
+    </div>
+    <!-- Common period controls -->
     <div class="row" style="margin-bottom:6px;align-items:center;">
       <button class="btn btn-o period-btn" data-period="day">День</button>
       <button class="btn btn-o period-btn" data-period="week">Неделя</button>
       <button class="btn btn-o period-btn" data-period="month">Месяц</button>
+      <button class="btn btn-o period-btn" data-period="year">Год</button>
       <button class="btn btn-o period-btn" data-period="custom">Свой</button>
       <div class="field fxs"><label>С</label><input type="date" id="an-date-from"></div>
       <div class="field fxs"><label>По</label><input type="date" id="an-date-to"></div>
       <button class="btn btn-g" id="btn-an-apply">Применить</button>
-      <button class="btn btn-o" id="btn-an-pdf">Скачать PDF</button>
+      <button class="btn btn-o" id="btn-an-pdf" style="margin-left:auto;">↓ PDF</button>
     </div>
-    <div class="analytics-kpi" id="an-kpi"></div>
-    <div class="analytics-grid" id="analytics-capture">
-      <div class="analytics-card"><canvas id="an-profit-chart" height="280"></canvas></div>
-      <div class="analytics-card" id="an-by-cur"></div>
+
+    <!-- TAB: P&L -->
+    <div id="an-tab-pnl">
+      <div class="analytics-kpi" id="an-kpi"></div>
+      <div class="analytics-grid" id="analytics-capture">
+        <div class="analytics-card"><canvas id="an-profit-chart" height="260"></canvas></div>
+        <div class="analytics-card" id="an-by-cur"></div>
+      </div>
+    </div>
+
+    <!-- TAB: Курсы -->
+    <div id="an-tab-rates" style="display:none;">
+      <div class="row" style="margin-bottom:10px;gap:8px;align-items:center;">
+        <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;">Валютная пара</span>
+        <select id="an-pair-select" class="field" style="padding:6px 10px;font-size:12px;font-weight:700;min-width:140px;margin:0;"></select>
+      </div>
+      <div class="analytics-card" style="margin-bottom:10px;">
+        <canvas id="an-rates-chart" height="240"></canvas>
+      </div>
+      <div id="an-rates-metrics" style="overflow-x:auto;"></div>
     </div>
   </div>
 </div>
@@ -1940,14 +1963,15 @@ function applyPeriod(period) {
   var now = new Date();
   var from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   var to = new Date(from.getTime());
-  if (period === 'week') from = shiftDays(to, -6);
+  if (period === 'week')  from = shiftDays(to, -6);
   else if (period === 'month') from = shiftDays(to, -29);
+  else if (period === 'year')  from = shiftDays(to, -364);
   document.getElementById('an-date-from').value = isoDate(from);
   document.getElementById('an-date-to').value = isoDate(to);
   document.querySelectorAll('.period-btn').forEach(function(b){
     b.classList.toggle('active', b.getAttribute('data-period') === period);
   });
-  renderAnalytics();
+  if (activeAnTab === 'rates') renderRatesChart(); else renderAnalytics();
 }
 function filterDealsByRange() {
   var fromVal = document.getElementById('an-date-from').value;
@@ -1968,18 +1992,23 @@ function renderAnalytics() {
   var byCur = {usdt:0,eur:0,huf:0,usd:0,czk:0};
   deals.forEach(function(d){
     var key = d.date;
-    if (!dayMap[key]) dayMap[key] = {usdt:0};
-    var usdtProfit = d.getCur === 'usdt' ? d.profit : 0;
-    dayMap[key].usdt += usdtProfit;
+    if (!dayMap[key]) dayMap[key] = {usdt:0,eur:0,huf:0};
     if (byCur[d.getCur] !== undefined) byCur[d.getCur] += d.profit;
+    // Accumulate profit per day per currency
+    if (d.getCur === 'usdt') dayMap[key].usdt += d.profit;
+    else if (d.getCur === 'eur') dayMap[key].eur += d.profit;
+    else if (d.getCur === 'huf') dayMap[key].huf += d.profit;
   });
   var labels = Object.keys(dayMap).sort(function(a,b){
     return (ddmmToDate(a)||new Date(0)) - (ddmmToDate(b)||new Date(0));
   });
-  var values = labels.map(function(k){ return +(dayMap[k].usdt || 0).toFixed(2); });
-  var totalUsdt = values.reduce(function(s,v){ return s+v; }, 0);
+  var vUsdt = labels.map(function(k){ return +(dayMap[k].usdt || 0).toFixed(2); });
+  var vEur  = labels.map(function(k){ return +(dayMap[k].eur  || 0).toFixed(2); });
+  var vHuf  = labels.map(function(k){ return +Math.round(dayMap[k].huf || 0); });
+
+  var totalUsdt = byCur.usdt;
   var kpi = '<div class="k"><div class="l">Сделок</div><div class="v">'+deals.length+'</div></div>'
-    + '<div class="k"><div class="l">P&L USDT</div><div class="v" style="color:'+ (totalUsdt>=0?'var(--green)':'var(--red)') +'">'+(totalUsdt>=0?'+':'')+totalUsdt.toFixed(2)+'</div></div>'
+    + '<div class="k"><div class="l">P&L USDT</div><div class="v" style="color:'+(totalUsdt>=0?'var(--green)':'var(--red)')+'">'+(totalUsdt>=0?'+':'')+totalUsdt.toFixed(2)+'</div></div>'
     + '<div class="k"><div class="l">EUR P&L</div><div class="v" style="color:var(--eur)">'+(byCur.eur>=0?'+':'')+byCur.eur.toFixed(2)+'</div></div>'
     + '<div class="k"><div class="l">HUF P&L</div><div class="v" style="color:var(--czk)">'+(byCur.huf>=0?'+':'')+Math.round(byCur.huf).toLocaleString('ru')+'</div></div>';
   document.getElementById('an-kpi').innerHTML = kpi;
@@ -1992,32 +2021,322 @@ function renderAnalytics() {
   var ctx = document.getElementById('an-profit-chart');
   if (!ctx || !window.Chart) return;
   if (analyticsChart) analyticsChart.destroy();
+
+  // Build datasets — only include currencies that have at least one non-zero day
+  var datasets = [];
+  var hasUsdt = vUsdt.some(function(v){ return v !== 0; });
+  var hasEur  = vEur.some(function(v){ return v !== 0; });
+  var hasHuf  = vHuf.some(function(v){ return v !== 0; });
+
+  if (hasUsdt) datasets.push({
+    label: 'USDT',
+    data: vUsdt,
+    borderColor: '#26d9a0',
+    backgroundColor: 'rgba(38,217,160,0.10)',
+    tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2,
+    yAxisID: 'yUsdt'
+  });
+  if (hasEur) datasets.push({
+    label: 'EUR',
+    data: vEur,
+    borderColor: '#4f8ef7',
+    backgroundColor: 'rgba(79,142,247,0.10)',
+    tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2,
+    yAxisID: 'yEur'
+  });
+  if (hasHuf) datasets.push({
+    label: 'HUF',
+    data: vHuf,
+    borderColor: '#b48bf7',
+    backgroundColor: 'rgba(180,139,247,0.10)',
+    tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2,
+    yAxisID: 'yHuf'
+  });
+
+  // If no data at all — show placeholder
+  if (!datasets.length) {
+    datasets.push({
+      label: 'Нет данных',
+      data: labels.map(function(){ return 0; }),
+      borderColor: '#4a5878', borderWidth: 1, pointRadius: 0
+    });
+  }
+
+  var scales = {
+    x: { ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' } }
+  };
+  // Only add y-axes for currencies that exist
+  if (hasUsdt) scales.yUsdt = {
+    type: 'linear', position: 'left',
+    ticks: { color: '#26d9a0' }, grid: { color: 'rgba(74,88,120,0.25)' },
+    title: { display: true, text: 'USDT', color: '#26d9a0', font: { size: 10 } }
+  };
+  if (hasEur) scales.yEur = {
+    type: 'linear', position: hasUsdt ? 'right' : 'left',
+    ticks: { color: '#4f8ef7' }, grid: { drawOnChartArea: !hasUsdt },
+    title: { display: true, text: 'EUR', color: '#4f8ef7', font: { size: 10 } }
+  };
+  if (hasHuf) scales.yHuf = {
+    type: 'linear', position: 'right',
+    ticks: { color: '#b48bf7' }, grid: { drawOnChartArea: false },
+    title: { display: true, text: 'HUF', color: '#b48bf7', font: { size: 10 } }
+  };
+  if (!hasUsdt && !hasEur && !hasHuf) scales.y = {
+    ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' }
+  };
+
   analyticsChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'P&L USDT по дням',
-        data: values,
-        borderColor: '#26d9a0',
-        backgroundColor: 'rgba(38,217,160,0.18)',
-        tension: 0.25,
-        fill: true
-      }]
-    },
+    data: { labels: labels, datasets: datasets },
     options: {
       responsive: true,
-      plugins: { legend: { labels: { color: '#dde4f0' } } },
-      scales: {
-        x: { ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' } },
-        y: { ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' } }
-      }
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#dde4f0', font: { size: 11 } } }
+      },
+      scales: scales
     }
   });
 }
+// ================================================================
+// ANALYTICS — TABS
+// ================================================================
+var activeAnTab = 'pnl';
+function switchAnTab(tab) {
+  activeAnTab = tab;
+  document.querySelectorAll('.an-tab-btn').forEach(function(b){
+    b.className = b.getAttribute('data-tab') === tab ? 'btn btn-g an-tab-btn active' : 'btn btn-o an-tab-btn';
+  });
+  document.getElementById('an-tab-pnl').style.display   = tab === 'pnl'   ? '' : 'none';
+  document.getElementById('an-tab-rates').style.display  = tab === 'rates'  ? '' : 'none';
+  if (tab === 'rates') renderRatesChart();
+}
+document.querySelectorAll('.an-tab-btn').forEach(function(b){
+  b.addEventListener('click', function(){ switchAnTab(this.getAttribute('data-tab')); });
+});
+
+// ================================================================
+// ANALYTICS — RATES CHART
+// ================================================================
+var ratesChart = null;
+
+/** Return all currency pairs that appear in deals */
+function getAvailablePairs() {
+  var pairSet = {};
+  exState.deals.forEach(function(d) {
+    var key = d.giveCur + '/' + d.getCur;
+    var rev = d.getCur + '/' + d.giveCur;
+    // Canonical: put more-expensive currency first (heuristic by known ordering)
+    var ORDER = {usdt:0, usd:1, eur:2, czk:3, huf:4};
+    var go = ORDER[d.giveCur] !== undefined ? ORDER[d.giveCur] : 5;
+    var ro = ORDER[d.getCur]  !== undefined ? ORDER[d.getCur]  : 5;
+    var canonical = go <= ro ? (d.giveCur + '/' + d.getCur) : (d.getCur + '/' + d.giveCur);
+    pairSet[canonical] = true;
+  });
+  return Object.keys(pairSet).sort();
+}
+
+/** Bucket a dd.mm date into a period key */
+function rateBucketKey(dateStr, granularity) {
+  var d = ddmmToDate(dateStr);
+  if (!d) return dateStr;
+  if (granularity === 'month') {
+    var mm = String(d.getMonth()+1).padStart(2,'0');
+    return mm + '.' + d.getFullYear();
+  }
+  return dateStr.substring(0, 5); // dd.mm
+}
+
+/** Format a bucket key for display */
+function fmtBucketLabel(key, granularity) {
+  if (granularity === 'month') return key; // "04.2026"
+  return key; // "dd.mm"
+}
+
+function renderRatesChart() {
+  // Populate pair dropdown from deals
+  var pairs = getAvailablePairs();
+  var sel = document.getElementById('an-pair-select');
+  var prevVal = sel.value;
+  sel.innerHTML = '';
+  pairs.forEach(function(p) {
+    var opt = document.createElement('option');
+    opt.value = p; opt.textContent = p.toUpperCase();
+    sel.appendChild(opt);
+  });
+  if (pairs.indexOf(prevVal) !== -1) sel.value = prevVal;
+  var pair = sel.value;
+  if (!pair) { document.getElementById('an-rates-metrics').innerHTML = '<div style="color:var(--muted);font-size:11px;padding:12px;">Нет сделок для анализа</div>'; return; }
+
+  var parts   = pair.split('/');
+  var baseCur = parts[0]; // e.g. "eur"
+  var quoteCur= parts[1]; // e.g. "huf"
+
+  var period = analyticsState.period || 'month';
+  var granularity = (period === 'year') ? 'month' : 'day';
+
+  var deals = filterDealsByRange();
+
+  // Buckets: key → {buyRates:[], sellRates:[], marketRates:[], spreadPcts:[]}
+  var buckets = {};
+  function ensureBucket(key) {
+    if (!buckets[key]) buckets[key] = {buyRates:[], sellRates:[], marketBuyRates:[], marketSellRates:[], spreadPcts:[], dealCount:0};
+  }
+
+  deals.forEach(function(d) {
+    var bk = rateBucketKey(d.date, granularity);
+    ensureBucket(bk);
+    var b = buckets[bk];
+
+    // Normalise stored rate → getCur/giveCur direction (same as tracker auto-import)
+    var ga = d.giveAmount, ra = d.getAmount, rt = parseFloat(d.rate) || 0;
+    if (rt > 0) {
+      var mv1 = ga * rt, mv2 = ga / rt;
+      if (Math.abs(mv2 - ra) < Math.abs(mv1 - ra)) rt = 1/rt; // now rt = getCur/giveCur
+    }
+
+    // BUY baseCur: client gives quoteCur, we give baseCur  (giveCur=quoteCur, getCur=baseCur)
+    if (d.giveCur === quoteCur && d.getCur === baseCur && ra > 0) {
+      var ourBuy = ga / ra; // quoteCur per baseCur (e.g. HUF per EUR)
+      b.buyRates.push(ourBuy);
+      if (rt > 0) b.marketBuyRates.push(1/rt); // rt=baseCur/quoteCur → invert
+      b.spreadPcts.push(parseFloat(d.pct)||0);
+      b.dealCount++;
+    }
+    // SELL baseCur: client gives baseCur, we give quoteCur  (giveCur=baseCur, getCur=quoteCur)
+    else if (d.giveCur === baseCur && d.getCur === quoteCur && ga > 0) {
+      var ourSell = ra / ga; // quoteCur per baseCur (e.g. HUF per EUR)
+      b.sellRates.push(ourSell);
+      if (rt > 0) b.marketSellRates.push(rt); // rt=quoteCur/baseCur already
+      b.spreadPcts.push(parseFloat(d.pct)||0);
+      b.dealCount++;
+    }
+  });
+
+  var labels = Object.keys(buckets).sort(function(a,b){
+    if (granularity === 'month') {
+      var pa=a.split('.'), pb=b.split('.');
+      return new Date(pa[1],pa[0]-1) - new Date(pb[1],pb[0]-1);
+    }
+    return (ddmmToDate(a)||new Date(0)) - (ddmmToDate(b)||new Date(0));
+  });
+
+  function avg(arr) { if (!arr.length) return null; return arr.reduce(function(s,v){return s+v;},0)/arr.length; }
+
+  var dataBuy    = labels.map(function(k){ return avg(buckets[k].buyRates); });
+  var dataSell   = labels.map(function(k){ return avg(buckets[k].sellRates); });
+  var dataMarket = labels.map(function(k){
+    var all = (buckets[k].marketBuyRates||[]).concat(buckets[k].marketSellRates||[]);
+    return avg(all);
+  });
+  var dataSpread = labels.map(function(k){ return avg(buckets[k].spreadPcts); });
+
+  var hasBuy    = dataBuy.some(function(v){ return v !== null; });
+  var hasSell   = dataSell.some(function(v){ return v !== null; });
+  var hasMarket = dataMarket.some(function(v){ return v !== null; });
+
+  var precision = (quoteCur === 'huf' || quoteCur === 'czk') ? 2 : 4;
+  function fmtRate(v){ return v === null ? '' : v.toFixed(precision); }
+
+  var datasets = [];
+  if (hasMarket) datasets.push({
+    label: 'Рынок',
+    data: dataMarket,
+    borderColor: '#4a5878', borderDash: [5,3], borderWidth: 2,
+    backgroundColor: 'transparent', tension: 0.2,
+    pointRadius: 3, spanGaps: true
+  });
+  if (hasBuy) datasets.push({
+    label: 'Наш курс покупки ' + baseCur.toUpperCase(),
+    data: dataBuy,
+    borderColor: '#26d9a0', borderWidth: 2,
+    backgroundColor: 'rgba(38,217,160,0.08)', tension: 0.2,
+    pointRadius: 4, spanGaps: true
+  });
+  if (hasSell) datasets.push({
+    label: 'Наш курс продажи ' + baseCur.toUpperCase(),
+    data: dataSell,
+    borderColor: '#ff5c7a', borderWidth: 2,
+    backgroundColor: 'rgba(255,92,122,0.08)', tension: 0.2,
+    pointRadius: 4, spanGaps: true
+  });
+
+  var ctx = document.getElementById('an-rates-chart');
+  if (!ctx || !window.Chart) return;
+  if (ratesChart) ratesChart.destroy();
+  ratesChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#dde4f0', font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var v = ctx.raw;
+              return v === null ? '' : ctx.dataset.label + ': ' + (v ? v.toFixed(precision) : '—') + ' ' + quoteCur.toUpperCase();
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' } },
+        y: {
+          ticks: { color: '#4a5878', callback: function(v){ return v.toFixed(precision); } },
+          grid: { color: 'rgba(74,88,120,0.25)' },
+          title: { display: true, text: quoteCur.toUpperCase() + ' за 1 ' + baseCur.toUpperCase(), color: '#4a5878', font: { size: 10 } }
+        }
+      }
+    }
+  });
+
+  // Metrics table
+  var totalDeals = labels.reduce(function(s,k){ return s + (buckets[k].dealCount||0); }, 0);
+  var allSpreads = [];
+  labels.forEach(function(k){ allSpreads = allSpreads.concat(buckets[k].spreadPcts||[]); });
+  var avgSpread = avg(allSpreads);
+
+  var tHead = '<tr style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;">'
+    + '<th style="text-align:left;padding:6px 10px;">Период</th>'
+    + '<th style="text-align:right;padding:6px 10px;">Рынок</th>'
+    + '<th style="text-align:right;padding:6px 10px;color:var(--green);">Покупка</th>'
+    + '<th style="text-align:right;padding:6px 10px;color:var(--red);">Продажа</th>'
+    + '<th style="text-align:right;padding:6px 10px;">Спред %</th>'
+    + '<th style="text-align:right;padding:6px 10px;">Сделок</th>'
+    + '</tr>';
+  var tRows = labels.map(function(k) {
+    var bk = buckets[k];
+    var mkt  = avg((bk.marketBuyRates||[]).concat(bk.marketSellRates||[]));
+    var buy  = avg(bk.buyRates);
+    var sell = avg(bk.sellRates);
+    var sp   = avg(bk.spreadPcts);
+    return '<tr style="font-size:11px;border-top:1px solid var(--border);">'
+      + '<td style="padding:5px 10px;color:var(--muted);">'+k+'</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:var(--text);">' + (mkt  !== null ? mkt.toFixed(precision)  : '—') + '</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:var(--green);">' + (buy  !== null ? buy.toFixed(precision)  : '—') + '</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:var(--red);">'   + (sell !== null ? sell.toFixed(precision) : '—') + '</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:var(--gold);">'  + (sp   !== null ? sp.toFixed(2)+'%' : '—') + '</td>'
+      + '<td style="padding:5px 10px;text-align:right;color:var(--muted);">' + bk.dealCount + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var summary = '<div class="row" style="gap:16px;margin-bottom:8px;flex-wrap:wrap;">'
+    + '<div class="k"><div class="l">Всего сделок</div><div class="v">'+totalDeals+'</div></div>'
+    + (avgSpread !== null ? '<div class="k"><div class="l">Средний спред</div><div class="v" style="color:var(--gold);">'+(avgSpread>=0?'+':'')+avgSpread.toFixed(2)+'%</div></div>' : '')
+    + '</div>';
+
+  document.getElementById('an-rates-metrics').innerHTML = summary
+    + '<table style="width:100%;border-collapse:collapse;background:var(--s1);border-radius:8px;overflow:hidden;">'
+    + '<thead>' + tHead + '</thead><tbody>' + tRows + '</tbody></table>';
+}
+
+document.getElementById('an-pair-select').addEventListener('change', renderRatesChart);
+
 document.getElementById('btn-ex-analytics').addEventListener('click', function(){
   document.getElementById('analytics-modal').classList.remove('hidden');
-  applyPeriod(analyticsState.period || 'day');
+  applyPeriod(analyticsState.period || 'month');
 });
 document.getElementById('analytics-close').addEventListener('click', function(){
   document.getElementById('analytics-modal').classList.add('hidden');
@@ -2028,7 +2347,9 @@ document.getElementById('analytics-modal').addEventListener('click', function(e)
 document.querySelectorAll('.period-btn').forEach(function(b){
   b.addEventListener('click', function(){ applyPeriod(this.getAttribute('data-period')); });
 });
-document.getElementById('btn-an-apply').addEventListener('click', function(){ renderAnalytics(); });
+document.getElementById('btn-an-apply').addEventListener('click', function(){
+  if (activeAnTab === 'rates') renderRatesChart(); else renderAnalytics();
+});
 document.getElementById('btn-an-pdf').addEventListener('click', function(){
   var target = document.getElementById('analytics-capture');
   if (!target || !window.html2canvas || !window.jspdf) return;
@@ -2958,9 +3279,9 @@ function doPost(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   if (params.type === 'transfer') {
-    var tSheet = ss.getSheetByName('Transfers');
+    var tSheet = ss.getSheetByName('Переводы') || ss.getSheetByName('Transfers');
     if (!tSheet) {
-      tSheet = ss.insertSheet('Transfers');
+      tSheet = ss.insertSheet('Переводы');
       tSheet.appendRow(['Timestamp','fromAgent','toAgent','cur','amt','note','date','time']);
     }
     tSheet.appendRow([
@@ -2975,11 +3296,13 @@ function doPost(e) {
     ]);
   } else {
     // deal
-    var dSheet = ss.getSheetByName('Deals') || ss.getSheetByName('Form responses 1');
+    var dSheet = ss.getSheetByName('Сделки')
+              || ss.getSheetByName('Deals')
+              || ss.getSheetByName('Form responses 1');
     if (!dSheet) {
-      dSheet = ss.insertSheet('Deals');
-      dSheet.appendRow(['Timestamp','agent','giveCur','giveAmount','getCur','getAmount','rate','pool_flag','usdtToOwner','note','date','time','agentId']);
+      dSheet = ss.insertSheet('Сделки');
     }
+    ensureDealHeaders(dSheet);
     dSheet.appendRow([
       new Date(),
       params.agent       || '',
@@ -3027,6 +3350,23 @@ function writeCashflow(p) {
   }
 }
 
+// Standard header for Deals sheet
+var DEAL_HEADERS = ['Timestamp','agent','giveCur','giveAmount','getCur','getAmount','rate','pool_flag','usdtToOwner','note','date','time','agentId'];
+
+function ensureDealHeaders(dSheet) {
+  if (dSheet.getLastRow() === 0) {
+    dSheet.appendRow(DEAL_HEADERS);
+    return;
+  }
+  // Check if first row looks like a header (first cell should be 'timestamp' or 'Timestamp')
+  var firstCell = dSheet.getRange(1, 1).getValue().toString().toLowerCase().trim();
+  if (firstCell !== 'timestamp') {
+    // First row is data, not a header — insert header row at the top
+    dSheet.insertRowBefore(1);
+    dSheet.getRange(1, 1, 1, DEAL_HEADERS.length).setValues([DEAL_HEADERS]);
+  }
+}
+
 function writeDeal(p) {
   try {
     var ss     = SpreadsheetApp.getActiveSpreadsheet();
@@ -3035,8 +3375,8 @@ function writeDeal(p) {
               || ss.getSheetByName('Form responses 1');
     if (!dSheet) {
       dSheet = ss.insertSheet('Сделки');
-      dSheet.appendRow(['Timestamp','agent','giveCur','giveAmount','getCur','getAmount','rate','pool_flag','usdtToOwner','note','date','time','agentId']);
     }
+    ensureDealHeaders(dSheet);
     dSheet.appendRow([
       new Date(),
       p.agent       || '',
@@ -3065,22 +3405,34 @@ function readDeals() {
            || ss.getSheetByName('Form responses 1');
   if (!sheet) return { ok: false, error: 'Лист Deals не найден' };
   var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return { ok: true, rows: [] };
-  var headers = data[0].map(function(h){ return h.toString().trim().toLowerCase(); });
+  if (data.length < 1) return { ok: true, rows: [] };
 
   var MAP = {
-    givecur:    ['givecur','give_cur','дают','валюта дают'],
-    giveamount: ['giveamount','give_amount','сумма дают'],
-    getcur:     ['getcur','get_cur','берут','валюта берут'],
-    getamount:  ['getamount','get_amount','сумма берут'],
-    rate:       ['rate','курс'],
-    agent:      ['agent','агент'],
-    client:     ['client','клиент','имя'],
-    note:       ['note','заметка','комментарий'],
-    pool_flag:    ['pool_flag','poolflag','пул'],
-    usdttoowner:  ['usdttoowner','usdt_to_owner'],
-    agentid:      ['agentid','agent_id','id агента']
+    givecur:     ['givecur','give_cur','дают','валюта дают'],
+    giveamount:  ['giveamount','give_amount','сумма дают'],
+    getcur:      ['getcur','get_cur','берут','валюта берут'],
+    getamount:   ['getamount','get_amount','сумма берут'],
+    rate:        ['rate','курс'],
+    agent:       ['agent','агент'],
+    client:      ['client','клиент','имя'],
+    note:        ['note','заметка','комментарий'],
+    date:        ['date','дата'],
+    time:        ['time','время'],
+    pool_flag:   ['pool_flag','poolflag','пул'],
+    usdttoowner: ['usdttoowner','usdt_to_owner'],
+    agentid:     ['agentid','agent_id','id агента']
   };
+
+  // Positional fallback: the standard column order written by writeDeal/doPost
+  // [0]=Timestamp [1]=agent [2]=giveCur [3]=giveAmount [4]=getCur [5]=getAmount
+  // [6]=rate [7]=pool_flag [8]=usdtToOwner [9]=note [10]=date [11]=time [12]=agentId
+  var POSITIONAL = {
+    givecur:2, giveamount:3, getcur:4, getamount:5, rate:6,
+    agent:1, client:-1, note:9, date:10, time:11,
+    pool_flag:7, usdttoowner:8, agentid:12
+  };
+
+  var headers = data[0].map(function(h){ return h.toString().trim().toLowerCase(); });
 
   function findCol(key) {
     var aliases = MAP[key] || [key];
@@ -3089,17 +3441,32 @@ function readDeals() {
     }
     return -1;
   }
+
   var cols = {};
   Object.keys(MAP).forEach(function(k){ cols[k] = findCol(k); });
 
+  // Detect whether row 0 is a real header or actual data
+  // A real header has at least 3 known column names
+  var foundCount = Object.keys(cols).filter(function(k){ return cols[k] >= 0; }).length;
+  var hasHeader = foundCount >= 3;
+
+  // If no recognisable headers, use positional mapping and start from row 0
+  if (!hasHeader) {
+    cols = POSITIONAL;
+  }
+
+  var startRow = hasHeader ? 1 : 0;
   var rows = [];
-  for (var r = 1; r < data.length; r++) {
+  for (var r = startRow; r < data.length; r++) {
     var row = data[r];
     var ts  = row[0];
     if (!ts) continue;
-    var obj = { _row: r + 1, timestamp: new Date(ts).toISOString() };
+    var tsStr;
+    try { tsStr = new Date(ts).toISOString(); } catch(e) { tsStr = ts.toString(); }
+    var obj = { _row: r + 1 };
+    obj.timestamp = tsStr;
     Object.keys(MAP).forEach(function(k){
-      obj[k] = cols[k] >= 0 ? row[cols[k]].toString().trim() : '';
+      obj[k] = cols[k] >= 0 ? (row[cols[k]] !== undefined ? row[cols[k]].toString().trim() : '') : '';
     });
     rows.push(obj);
   }
@@ -3108,7 +3475,7 @@ function readDeals() {
 
 function readTransfers() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Переводы') || ss.getSheetByName('Transfers');
+  var sheet = ss.getSheetByName('Переводы') || ss.getSheetByName('Transfers') || ss.getSheetByName('переводы');
   if (!sheet) return { ok: true, rows: [] };
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return { ok: true, rows: [] };

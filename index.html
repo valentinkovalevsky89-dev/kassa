@@ -2457,107 +2457,109 @@ document.getElementById('btn-an-pdf').addEventListener('click', function(){
     });
   }
 
-  // ── Страница 2: Пояснительная записка по атрибуционным пулам ──
+  // ── Page 2: Attribution pool chains (only pools with intermediate currencies) ──
   var pLog = exState.poolLog || [];
-  if (pLog.length) {
+  // Build chains: group migrations by original poolId
+  var chains = {};
+  pLog.forEach(function(ev) {
+    var rootId = ev.poolId ? ev.poolId.split('_mv_')[0] : null;
+    if (!rootId) return;
+    if (!chains[rootId]) chains[rootId] = { created: null, steps: [], consumed: [], closed: false };
+    if (ev.type === 'created')  chains[rootId].created = ev;
+    if (ev.type === 'migrated') chains[rootId].steps.push(ev);
+    if (ev.type === 'consumed') chains[rootId].consumed.push(ev);
+    if (ev.type === 'closed')   chains[rootId].closed = true;
+  });
+  // Keep only chains that have at least one migration (intermediate currency)
+  var chainKeys = Object.keys(chains).filter(function(k){ return chains[k].steps.length > 0; });
+
+  if (chainKeys.length) {
     pdf.addPage();
     pdf.setFillColor(7, 10, 16);
     pdf.rect(0, 0, 297, 210, 'F');
 
     var py = margin + 6;
-    pdf.setFontSize(12); pdf.setTextColor(221, 228, 240);
-    pdf.text('Пояснительная записка — Атрибуционные пулы', margin, py);
-    py += 5;
-    pdf.setFontSize(8); pdf.setTextColor(74, 88, 120);
-    pdf.text('Автоматически сформировано на основе цепочек сделок', margin, py);
-    py += 8;
-
-    var fmtN = function(n, decimals) { return (Math.round(n * Math.pow(10, decimals || 0)) / Math.pow(10, decimals || 0)).toLocaleString('ru'); };
-    var iconMap = { created: '✦', migrated: '↔', consumed: '✅', closed: '●' };
-    var colorMap = {
-      created:  [38, 217, 160],
-      migrated: [90, 160, 255],
-      consumed: [255, 209, 70],
-      closed:   [74, 88, 120]
+    var fmtN2 = function(n, d) {
+      var factor = Math.pow(10, d || 0);
+      return (Math.round(n * factor) / factor).toLocaleString('ru');
     };
-
-    pLog.forEach(function(ev) {
-      if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
-
-      var col = colorMap[ev.type] || [221, 228, 240];
-      pdf.setTextColor(col[0], col[1], col[2]);
-      pdf.setFontSize(9);
-
-      var timeStr = (ev.date || '') + (ev.time ? ' ' + ev.time : '');
-      var icon = iconMap[ev.type] || '•';
-      var line = '';
-
-      if (ev.type === 'created') {
-        line = icon + ' [' + timeStr + ']  Создан пул: '
-          + fmtN(ev.amount, 0) + ' ' + (ev.cur || '').toUpperCase()
-          + '  (себестоимость: ' + fmtN(ev.costUsdt, 2) + ' USDT'
-          + ',  курс: ' + fmtN(ev.costUsdt / ev.amount, 4) + ' USDT/' + (ev.cur || '').toUpperCase() + ')';
-      } else if (ev.type === 'migrated') {
-        line = icon + ' [' + timeStr + ']  Пул мигрировал: '
-          + fmtN(ev.amount, 0) + ' ' + (ev.cur || '').toUpperCase()
-          + ' → ' + fmtN(ev.toAmount, 0) + ' ' + (ev.toCur || '').toUpperCase()
-          + '  (курс сделки: ' + fmtN(ev.rate, 4) + ',  база USDT сохранена: ' + fmtN(ev.costUsdt, 2) + ')';
-      } else if (ev.type === 'consumed') {
-        var sign70 = ev.profit70 >= 0 ? '+' : '';
-        var sign30 = ev.profit30 >= 0 ? '+' : '';
-        line = icon + ' [' + timeStr + ']  Пул продан в USDT: '
-          + fmtN(ev.amount, 0) + ' ' + (ev.cur || '').toUpperCase()
-          + ' → ' + fmtN(ev.receivedUsdt, 2) + ' USDT'
-          + '  |  Профит: ' + (ev.profit >= 0 ? '+' : '') + fmtN(ev.profit, 2) + ' USDT'
-          + '  (владелец ' + sign70 + fmtN(ev.profit70, 2) + ',  совладелец ' + sign30 + fmtN(ev.profit30, 2) + ')';
-      } else if (ev.type === 'closed') {
-        line = icon + ' [' + timeStr + ']  Пул закрыт: ' + (ev.cur || '').toUpperCase();
-      }
-
-      if (line) {
-        var maxLineWidth = 275;
-        var splitLines = pdf.splitTextToSize(line, maxLineWidth);
-        pdf.text(splitLines, margin, py);
-        py += splitLines.length * 5 + 2;
-      }
-    });
-
-    // Итого по пулам
-    var totalConsumed = pLog.filter(function(e){ return e.type === 'consumed'; });
-    if (totalConsumed.length) {
-      py += 4;
-      if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
-      pdf.setDrawColor(74, 88, 120);
-      pdf.line(margin, py - 2, 287, py - 2);
-      pdf.setFontSize(9); pdf.setTextColor(221, 228, 240);
-      var totProfit = totalConsumed.reduce(function(s, e){ return s + (e.profit || 0); }, 0);
-      var totOwner  = totalConsumed.reduce(function(s, e){ return s + (e.profit70 || 0); }, 0);
-      var totPartner= totalConsumed.reduce(function(s, e){ return s + (e.profit30 || 0); }, 0);
-      pdf.text(
-        'Итого по пулам:  профит ' + (totProfit >= 0 ? '+' : '') + fmtN(totProfit, 2) + ' USDT'
-        + '    владелец ' + (totOwner >= 0 ? '+' : '') + fmtN(totOwner, 2)
-        + '    совладелец ' + (totPartner >= 0 ? '+' : '') + fmtN(totPartner, 2),
-        margin, py
-      );
+    function newPdfPage() {
+      pdf.addPage();
+      pdf.setFillColor(7, 10, 16);
+      pdf.rect(0, 0, 297, 210, 'F');
+      py = margin + 6;
+    }
+    function pdfLine(text, color, size) {
+      if (py > 196) newPdfPage();
+      pdf.setFontSize(size || 9);
+      pdf.setTextColor(color[0], color[1], color[2]);
+      pdf.text(String(text), margin, py);
+      py += (size || 9) * 0.45 + 2;
     }
 
-    // Активные пулы на момент генерации
-    var activePools = exState.attributionPools || [];
-    if (activePools.length) {
-      py += 10;
-      if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
-      pdf.setFontSize(9); pdf.setTextColor(90, 160, 255);
-      pdf.text('Активные пулы (не закрыты):', margin, py);
-      py += 6;
-      activePools.forEach(function(p) {
-        if (py > 195) { pdf.addPage(); pdf.setFillColor(7,10,16); pdf.rect(0,0,297,210,'F'); py = margin + 6; }
-        pdf.setFontSize(8); pdf.setTextColor(160, 180, 220);
-        var pline = '  • ' + fmtN(p.remainingAmt, 0) + ' ' + (p.cur || '').toUpperCase()
-          + '  (открыт: ' + (p.date || '—') + ',  база: ' + fmtN(p.costUsdtPerUnit, 4) + ' USDT/' + (p.cur || '').toUpperCase()
-          + ',  остаток от ' + fmtN(p.originalAmt, 0) + ')';
-        pdf.text(pline, margin, py);
-        py += 5;
+    // Header (Latin only)
+    pdfLine('Attribution Pool Chains  (intermediate currencies)', [221, 228, 240], 11);
+    pdfLine('Pools that passed through one or more non-USDT currencies before closing', [74, 88, 120], 8);
+    py += 4;
+
+    chainKeys.forEach(function(rootId, idx) {
+      var ch = chains[rootId];
+      var cr = ch.created;
+      if (py > 185) newPdfPage();
+
+      // Chain header
+      var openDate = cr ? (cr.date || '') + (cr.time ? ' ' + cr.time : '') : '';
+      var startCur = cr ? (cr.cur || '').toUpperCase() : '?';
+      var startAmt = cr ? fmtN2(cr.amount, 0) : '?';
+      var costUsdt = cr ? fmtN2(cr.costUsdt, 2) : '?';
+      pdfLine('Chain #' + (idx + 1) + '  [' + openDate + ']', [38, 217, 160], 9);
+      pdfLine('  Start: USDT ' + costUsdt + '  ->  ' + startAmt + ' ' + startCur
+        + '  (rate: ' + (cr ? fmtN2(cr.costUsdt / cr.amount, 4) : '?') + ' USDT/' + startCur + ')',
+        [160, 200, 220], 8);
+
+      // Migration steps
+      ch.steps.forEach(function(mv) {
+        pdfLine('  -> ' + fmtN2(mv.amount, 0) + ' ' + (mv.cur||'').toUpperCase()
+          + '  =>  ' + fmtN2(mv.toAmount, 0) + ' ' + (mv.toCur||'').toUpperCase()
+          + '   [' + (mv.date||'') + ']  USDT basis: ' + fmtN2(mv.costUsdt, 2),
+          [90, 160, 255], 8);
       });
+
+      // Consumed events
+      ch.consumed.forEach(function(cn) {
+        var sp = cn.profit >= 0 ? '+' : '';
+        var s7 = cn.profit70 >= 0 ? '+' : '';
+        var s3 = cn.profit30 >= 0 ? '+' : '';
+        pdfLine('  -> ' + fmtN2(cn.amount, 0) + ' ' + (cn.cur||'').toUpperCase()
+          + '  =>  ' + fmtN2(cn.receivedUsdt, 2) + ' USDT'
+          + '   P&L: ' + sp + fmtN2(cn.profit, 2) + ' USDT'
+          + '  (owner ' + s7 + fmtN2(cn.profit70, 2) + ' / partner ' + s3 + fmtN2(cn.profit30, 2) + ')',
+          [255, 209, 70], 8);
+      });
+
+      if (ch.closed) {
+        pdfLine('  [CLOSED]', [74, 88, 120], 8);
+      } else {
+        pdfLine('  [OPEN - not yet closed]', [90, 160, 255], 8);
+      }
+      py += 3;
+    });
+
+    // Summary
+    var allConsumed = pLog.filter(function(e){ return e.type === 'consumed'; });
+    if (allConsumed.length) {
+      if (py > 190) newPdfPage();
+      py += 2;
+      pdf.setDrawColor(74, 88, 120);
+      pdf.line(margin, py, 287, py);
+      py += 5;
+      var totP  = allConsumed.reduce(function(s,e){ return s+(e.profit||0); }, 0);
+      var totO  = allConsumed.reduce(function(s,e){ return s+(e.profit70||0); }, 0);
+      var totPt = allConsumed.reduce(function(s,e){ return s+(e.profit30||0); }, 0);
+      pdfLine('Total pool P&L: ' + (totP>=0?'+':'') + fmtN2(totP,2) + ' USDT'
+        + '   owner: ' + (totO>=0?'+':'') + fmtN2(totO,2)
+        + '   partner: ' + (totPt>=0?'+':'') + fmtN2(totPt,2),
+        [221, 228, 240], 9);
     }
   }
 

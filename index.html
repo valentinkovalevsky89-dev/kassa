@@ -753,8 +753,8 @@ function syncCapital() {
   rebuildRounds();
   renderExchange();
 }
-function today() { return new Date().toLocaleDateString('ru',{day:'2-digit',month:'2-digit'}); }
-function now()   { return new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'}); }
+function today() { var d=new Date(); return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); }
+function now()   { var d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
 // ================================================================
 // ROUND LOGIC
@@ -2387,33 +2387,40 @@ document.getElementById('btn-an-apply').addEventListener('click', function(){
   if (activeAnTab === 'rates') renderRatesChart(); else renderAnalytics();
 });
 document.getElementById('btn-an-pdf').addEventListener('click', function(){
-  if (!window.jspdf) { alert('jsPDF не загружен'); return; }
+  if (!window.jspdf) { alert('jsPDF not loaded'); return; }
   var pdf = new window.jspdf.jsPDF('landscape', 'mm', 'a4');
   var pw = 277, ph = 190, margin = 10;
   var y = margin;
+
+  // Strip non-ASCII (Cyrillic etc.) — jsPDF default font is Latin-only
+  function safeText(s) {
+    return String(s || '').replace(/[^\x00-\x7F]/g, '?');
+  }
+
+  var d = new Date();
+  var dateStr = String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + d.getFullYear();
 
   pdf.setFillColor(7, 10, 16);
   pdf.rect(0, 0, 297, 210, 'F');
   pdf.setTextColor(221, 228, 240);
   pdf.setFontSize(13);
-  pdf.text('Business Tracker — Аналитика', margin, y + 5);
+  pdf.text('Business Tracker - Analytics', margin, y + 5);
   pdf.setFontSize(9);
   pdf.setTextColor(74, 88, 120);
-  pdf.text(new Date().toLocaleDateString('ru'), margin, y + 11);
+  pdf.text(dateStr, margin, y + 11);
   y += 18;
 
-  // KPI строки из DOM
+  // KPI — read values from DOM, strip Cyrillic labels, keep numeric values
   var kpiEl = document.getElementById('an-kpi');
   if (kpiEl) {
-    var kpiText = '';
+    var kpiParts = [];
     kpiEl.querySelectorAll('.k').forEach(function(k) {
-      var l = (k.querySelector('.l') || {}).textContent || '';
-      var v = (k.querySelector('.v') || {}).textContent || '';
-      kpiText += l + ': ' + v + '   ';
+      var v = ((k.querySelector('.v') || {}).textContent || '').trim();
+      if (v) kpiParts.push(safeText(v));
     });
-    if (kpiText.trim()) {
+    if (kpiParts.length) {
       pdf.setFontSize(10); pdf.setTextColor(221, 228, 240);
-      pdf.text(kpiText.trim(), margin, y);
+      pdf.text(kpiParts.join('   '), margin, y);
       y += 8;
     }
   }
@@ -2444,16 +2451,15 @@ document.getElementById('btn-an-pdf').addEventListener('click', function(){
     } catch(e) {}
   }
 
-  // Metrics table text (для вкладки Курсы)
+  // Metrics table — values only (strip Cyrillic labels from headers)
   var metricsEl = document.getElementById('an-rates-metrics');
   if (metricsEl && activeAnTab === 'rates' && y < ph) {
     pdf.setFontSize(8); pdf.setTextColor(74, 88, 120);
     metricsEl.querySelectorAll('tr').forEach(function(row) {
       if (y >= ph) return;
       var cells = row.querySelectorAll('th, td');
-      var line = Array.from(cells).map(function(c){ return c.textContent.trim(); }).join('   ');
-      pdf.text(line, margin, y);
-      y += 5;
+      var line = Array.from(cells).map(function(c){ return safeText(c.textContent.trim()); }).join('   ');
+      if (line.trim()) { pdf.text(line, margin, y); y += 5; }
     });
   }
 
@@ -3206,7 +3212,8 @@ setTimeout(function autoLoadOnStartup() {
     });
     if (newDeals.length > 0) {
       newDeals.sort(function(a,b){ return a.id - b.id; });
-      if (!exState.openRound2 && newDeals.length > 0) autoOpenRound(newDeals[0]);
+      // Do NOT auto-open a round here — imported deals may be from previous days.
+      // Round opens only when user manually adds a deal for today.
       newDeals.forEach(function(d){ exState.deals.push(d); });
       rebuildRounds(); save(); renderExchange();
     }

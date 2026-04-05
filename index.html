@@ -3250,8 +3250,11 @@ setTimeout(function autoLoadOnStartup() {
     });
     if (newDeals.length > 0) {
       newDeals.sort(function(a,b){ return a.id - b.id; });
-      // Do NOT auto-open a round here — imported deals may be from previous days.
-      // Round opens only when user manually adds a deal for today.
+      // Auto-open round only for today's deals (prevents old imported data from opening stale rounds)
+      if (!exState.openRound2) {
+        var todayNew = newDeals.filter(function(d){ return d.date === today(); });
+        if (todayNew.length > 0) autoOpenRound(todayNew[0]);
+      }
       newDeals.forEach(function(d){ exState.deals.push(d); });
       rebuildRounds(); save(); renderExchange();
     }

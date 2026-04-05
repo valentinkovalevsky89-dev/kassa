@@ -777,7 +777,22 @@ function resetFormAfterAdd() {
   // Reset usdtToOwner to checked=true every time — never leave it sticky
   var toOwnerChk = document.getElementById('usdt-to-owner');
   if (toOwnerChk) toOwnerChk.checked = true;
-  // usdt-from-owner stays as-is (currency change listener controls it)
+
+  // Re-apply checkbox visibility based on current currency pair
+  // (change event won't fire if currency didn't change between deals)
+  var gc = document.getElementById('give-cur').value;
+  var rc = document.getElementById('get-cur').value;
+  var rowFrom = document.getElementById('usdt-from-owner-row');
+  var rowTo   = document.getElementById('usdt-to-owner-row');
+  if (rowFrom) {
+    var showFrom = !IS_OWNER && gc === 'usdt';
+    rowFrom.style.display = showFrom ? '' : 'none';
+    if (!showFrom) document.getElementById('usdt-from-owner').checked = false;
+  }
+  if (rowTo) {
+    var showTo = !IS_OWNER && rc === 'usdt';
+    rowTo.style.display = showTo ? '' : 'none';
+  }
 }
 
 // ADD TO QUEUE

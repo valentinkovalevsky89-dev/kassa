@@ -915,23 +915,9 @@ function renderExAgents() {
   exState.deals.forEach(function(d) {
     var agentObj = getAgent(d.agent || 'owner');
     var agentId  = agentObj ? agentObj.id : 'owner';
-    if (!holdings[agentId])    holdings[agentId]    = {eur:0,huf:0,usdt:0,usd:0,czk:0};
-    if (!holdings['owner'])    holdings['owner']    = {eur:0,huf:0,usdt:0,usd:0,czk:0};
-
-    // poolFlag=true: co-owner bought with OWNER's USDT → debit owner, not co-owner
-    if (d.poolFlag && d.giveCur === 'usdt' && agentId !== 'owner') {
-      holdings['owner'][d.giveCur]  -= d.giveAmount;
-      holdings[agentId][d.getCur]   += d.getAmount;
-    }
-    // usdtToOwner=true: co-owner sold and USDT goes back to owner → credit owner, not co-owner
-    else if (d.usdtToOwner && d.getCur === 'usdt' && agentId !== 'owner') {
-      holdings[agentId][d.giveCur]  -= d.giveAmount;
-      holdings['owner'][d.getCur]   += d.getAmount;
-    }
-    else {
-      holdings[agentId][d.giveCur]  -= d.giveAmount;
-      holdings[agentId][d.getCur]   += d.getAmount;
-    }
+    if (!holdings[agentId]) holdings[agentId] = {eur:0,huf:0,usdt:0,usd:0,czk:0};
+    holdings[agentId][d.giveCur] -= d.giveAmount;
+    holdings[agentId][d.getCur]  += d.getAmount;
   });
 
   // Apply transfers — fromAgent loses, toAgent gains
@@ -2710,23 +2696,9 @@ function runReport(reportDateStr) {
   exState.deals.forEach(function(d) {
     var agentObj = getAgent(d.agent || 'owner');
     var aid = agentObj ? agentObj.id : 'owner';
-    if (!holdMap[aid])       holdMap[aid]       = {eur:0,huf:0,usdt:0,usd:0,czk:0};
-    if (!holdMap['owner'])   holdMap['owner']   = {eur:0,huf:0,usdt:0,usd:0,czk:0};
-
-    // poolFlag=true: co-owner bought with OWNER's USDT → debit owner, not co-owner
-    if (d.poolFlag && d.giveCur === 'usdt' && aid !== 'owner') {
-      holdMap['owner'][d.giveCur]  -= d.giveAmount;
-      holdMap[aid][d.getCur]       += d.getAmount;
-    }
-    // usdtToOwner=true: co-owner sold and USDT returns to owner → credit owner, not co-owner
-    else if (d.usdtToOwner && d.getCur === 'usdt' && aid !== 'owner') {
-      holdMap[aid][d.giveCur]      -= d.giveAmount;
-      holdMap['owner'][d.getCur]   += d.getAmount;
-    }
-    else {
-      holdMap[aid][d.giveCur]      -= d.giveAmount;
-      holdMap[aid][d.getCur]       += d.getAmount;
-    }
+    if (!holdMap[aid]) holdMap[aid] = {eur:0,huf:0,usdt:0,usd:0,czk:0};
+    holdMap[aid][d.giveCur] -= d.giveAmount;
+    holdMap[aid][d.getCur]  += d.getAmount;
   });
 
   // — Helper: convert spread map to USDT

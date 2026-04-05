@@ -204,6 +204,44 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 .sub-tab:hover:not(.active){color:var(--text);}
 .sub-pane{display:none;}
 .sub-pane.active{display:block;}
+/* TOAST */
+#toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
+.toast{background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:11px 16px;font-size:12px;color:var(--text);
+  box-shadow:0 4px 20px rgba(0,0,0,.55);max-width:340px;pointer-events:auto;
+  animation:toast-in .2s ease;display:flex;align-items:center;gap:10px;}
+.toast.ok {border-left:3px solid var(--green);}
+.toast.err{border-left:3px solid var(--red);}
+.toast.warn{border-left:3px solid var(--gold);}
+.toast-icon{font-size:13px;flex-shrink:0;}
+@keyframes toast-in {from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+@keyframes toast-out{from{opacity:1;transform:translateY(0);}to{opacity:0;transform:translateY(10px);}}
+/* CONFIRM MODAL */
+#modal-confirm{z-index:2000;}
+.confirm-modal{max-width:400px;padding:26px 28px 22px;}
+.confirm-title{font-size:13px;font-weight:700;margin-bottom:8px;color:var(--text);}
+.confirm-text{font-size:11px;color:var(--muted);line-height:1.7;margin-bottom:22px;}
+.confirm-btns{display:flex;gap:8px;justify-content:flex-end;}
+
+/* POOL PANEL */
+.pools-section{margin-bottom:16px;}
+.pools-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.pools-title{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
+.pools-count-badge{background:rgba(240,167,50,.18);color:var(--huf);border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700;}
+.pools-partner{font-size:9px;color:var(--muted);}
+.pool-item{background:var(--bg);border:1px solid var(--border);border-left:3px solid transparent;border-radius:9px;padding:10px 13px;margin-bottom:6px;display:grid;grid-template-columns:56px 1fr auto;gap:10px;align-items:center;}
+.pool-cur-col{display:flex;align-items:center;}
+.pool-mid{}
+.pool-amt{font-size:12px;font-weight:700;margin-bottom:4px;}
+.pool-progress-track{height:4px;background:var(--border);border-radius:2px;margin-bottom:3px;}
+.pool-progress-fill{height:4px;border-radius:2px;transition:width .4s;}
+.pool-meta{font-size:9px;color:var(--muted);}
+.pool-right{text-align:right;min-width:90px;}
+.pool-usdt{font-size:12px;font-weight:700;color:var(--usdt);}
+.pool-date{font-size:9px;color:var(--muted);margin-top:2px;}
+.pools-total{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 13px;display:flex;justify-content:space-between;align-items:center;margin-top:4px;}
+.pools-total-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;}
+.pools-total-val{font-size:13px;font-weight:700;color:var(--usdt);}
+
 /* ── Print frame (hidden on screen, shown only when printing) ── */
 #print-frame{display:none;}
 @media print {
@@ -230,6 +268,21 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 </style>
 </head>
 <body>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Confirm modal -->
+<div id="modal-confirm" class="modal-overlay hidden">
+  <div class="modal confirm-modal">
+    <div id="mc-title" class="confirm-title"></div>
+    <div id="mc-text" class="confirm-text"></div>
+    <div class="confirm-btns">
+      <button id="mc-cancel" class="btn btn-o" style="padding:9px 20px;">Отмена</button>
+      <button id="mc-ok" class="btn btn-r" style="padding:9px 20px;">Подтвердить</button>
+    </div>
+  </div>
+</div>
 
 <nav class="nav">
   <div class="nav-logo">TRACKER</div>
@@ -262,6 +315,9 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
 
     <!-- AGENT CARDS -->
     <div class="g2" id="ex-agents"></div>
+
+    <!-- ATTRIBUTION POOLS PANEL -->
+    <div id="ex-pools-section"></div>
 
     <!-- CHARTS -->
     <div class="charts-grid" id="ex-charts"></div>
@@ -549,6 +605,44 @@ var CURS = ['eur','huf','usdt','usd','czk'];
 var SYM  = {eur:'€',huf:'Ft',usdt:'USDT',usd:'$',czk:'Kč',uah:'₴'};
 var CLR  = {eur:'var(--eur)',huf:'var(--huf)',usdt:'var(--usdt)',usd:'var(--usd)',czk:'var(--czk)'};
 var ATTR_PARTNER_FALLBACK = 'a2';
+
+// ================================================================
+// UI HELPERS — toast & confirm
+// ================================================================
+function showToast(text, type) {
+  var c = document.getElementById('toast-container');
+  if (!c) return;
+  var icons = {ok:'✓', err:'✕', warn:'!'};
+  var d = document.createElement('div');
+  d.className = 'toast ' + (type || 'ok');
+  d.innerHTML = '<span class="toast-icon">' + (icons[type] || 'ℹ') + '</span><span>' + text + '</span>';
+  c.appendChild(d);
+  setTimeout(function() {
+    d.style.animation = 'toast-out .2s ease forwards';
+    setTimeout(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, 220);
+  }, 3200);
+}
+
+var _confirmCb = null;
+function showConfirm(title, text, onOk, okLabel, okCls) {
+  document.getElementById('mc-title').textContent = title;
+  document.getElementById('mc-text').textContent  = text || '';
+  var okBtn = document.getElementById('mc-ok');
+  okBtn.textContent  = okLabel || 'Подтвердить';
+  okBtn.className    = 'btn ' + (okCls || 'btn-r') + ' ' + 'confirm-ok-btn';
+  okBtn.style.padding = '9px 20px';
+  _confirmCb = onOk;
+  document.getElementById('modal-confirm').classList.remove('hidden');
+}
+document.getElementById('mc-ok').addEventListener('click', function() {
+  document.getElementById('modal-confirm').classList.add('hidden');
+  var cb = _confirmCb; _confirmCb = null;
+  if (cb) cb();
+});
+document.getElementById('mc-cancel').addEventListener('click', function() {
+  document.getElementById('modal-confirm').classList.add('hidden');
+  _confirmCb = null;
+});
 
 function getAttrPartnerId() {
   if (agentCfg.agents.some(function(a){ return a.id === ATTR_PARTNER_FALLBACK; })) return ATTR_PARTNER_FALLBACK;
@@ -1023,6 +1117,68 @@ function renderExAgents() {
   if (badge) badge.textContent = (1 + agentCfg.agents.length) + ' агент' + (agentCfg.agents.length === 0 ? '' : agentCfg.agents.length < 4 ? 'а' : 'ов');
 }
 
+function renderPools() {
+  var section = document.getElementById('ex-pools-section');
+  if (!section) return;
+
+  var pools = exState.attributionPools || [];
+  if (!pools.length) { section.innerHTML = ''; return; }
+
+  var attrPartnerId = getAttrPartnerId();
+  var partnerObj = getAgent(attrPartnerId);
+  var partnerName = partnerObj ? partnerObj.name : '—';
+
+  var totalUsdt = 0;
+  pools.forEach(function(p) {
+    totalUsdt += (p.remainingAmt || 0) * (p.costUsdtPerUnit || 0);
+  });
+
+  var h = '<div class="pools-section">';
+  h += '<div class="pools-hdr">'
+    + '<div class="pools-title">Активные пулы</div>'
+    + '<div style="display:flex;align-items:center;gap:8px;">'
+    + '<span class="pools-partner">партнёр: <b style="color:var(--text)">' + partnerName + '</b></span>'
+    + '<span class="pools-count-badge">' + pools.length + '</span>'
+    + '</div>'
+    + '</div>';
+
+  pools.forEach(function(p) {
+    var cur = p.cur || 'usdt';
+    var color = CLR[cur] || 'var(--text)';
+    var pctLeft = p.originalAmt > 0 ? Math.min(100, p.remainingAmt / p.originalAmt * 100) : 0;
+    var pctConsumed = 100 - pctLeft;
+    var lockedUsdt = (p.remainingAmt || 0) * (p.costUsdtPerUnit || 0);
+    var stageStr = p.stage > 0 ? ' · этап ' + p.stage : '';
+
+    h += '<div class="pool-item" style="border-left-color:' + color + '">'
+      + '<div class="pool-cur-col"><span class="tag t-' + cur + '">' + cur.toUpperCase() + '</span></div>'
+      + '<div class="pool-mid">'
+      + '<div class="pool-amt" style="color:' + color + '">' + fmt(p.remainingAmt, cur) + '</div>'
+      + '<div class="pool-progress-track">'
+      + '<div class="pool-progress-fill" style="width:' + pctLeft.toFixed(1) + '%;background:' + color + '"></div>'
+      + '</div>'
+      + '<div class="pool-meta">'
+      + pctLeft.toFixed(0) + '% осталось'
+      + (pctConsumed > 0.5 ? ' · потреблено ' + pctConsumed.toFixed(0) + '%' : '')
+      + stageStr
+      + '</div>'
+      + '</div>'
+      + '<div class="pool-right">'
+      + '<div class="pool-usdt">' + lockedUsdt.toFixed(2) + ' USDT</div>'
+      + '<div class="pool-date">' + (p.date || '') + '</div>'
+      + '</div>'
+      + '</div>';
+  });
+
+  h += '<div class="pools-total">'
+    + '<span class="pools-total-lbl">Итого USDT в пулах</span>'
+    + '<span class="pools-total-val">' + totalUsdt.toFixed(2) + ' USDT</span>'
+    + '</div>';
+
+  h += '</div>';
+  section.innerHTML = h;
+}
+
 function renderExCharts() {
   // Profits by currency
   var pr = exState.profits;
@@ -1135,6 +1291,7 @@ function renderExLog() {
 function renderExchange() {
   renderExAssets();
   renderExAgents();
+  renderPools();
   renderExCharts();
   renderExLog();
   if(document.getElementById("cf-log")) renderCfLog();
@@ -1304,7 +1461,7 @@ function autoOpenRound(triggerDeal) {
 }
 
 function openRound2() {
-  if (exState.openRound2) { alert('Сначала закрой текущий раунд.'); return; }
+  if (exState.openRound2) { showToast('Сначала закрой текущий раунд.', 'warn'); return; }
   var nameEl = document.getElementById('round-name-input');
   var name = nameEl ? nameEl.value.trim() : '';
   if (!name) name = 'Раунд ' + (exState.rounds2.length + 1);
@@ -1352,7 +1509,7 @@ function openRound2() {
     exState.openRound2 = round.id;
     save();
     renderRounds();
-    alert('Не удалось загрузить курсы ('+e.message+'). Использованы приблизительные значения. Уточни вручную.');
+    showToast('Не удалось загрузить курсы. Использованы приблизительные значения.', 'warn');
   });
 }
 
@@ -1361,17 +1518,16 @@ function closeRound2() {
   var round = exState.rounds2.find(function(r){ return r.id === exState.openRound2; });
   if (!round) return;
 
-  if (!confirm('Закрыть раунд "'+round.name+'" и зафиксировать прибыль?')) return;
+  showConfirm('Закрыть раунд?', '"' + round.name + '" · прибыль будет зафиксирована', function() {
+    var btn = document.getElementById('btn-close-round');
+    if (btn) { btn.textContent = '⟳ Загрузка курсов...'; btn.disabled = true; }
 
-  var btn = document.getElementById('btn-close-round');
-  if (btn) { btn.textContent = '⟳ Загрузка курсов...'; btn.disabled = true; }
-
-  fetchAllRatesUsdt().then(function(closeRates) {
-    finalizeRound(round, closeRates);
-  }).catch(function() {
-    // Use opening rates as fallback
-    finalizeRound(round, round.rates);
-    alert('Не удалось загрузить актуальные курсы. Использованы курсы открытия раунда.');
+    fetchAllRatesUsdt().then(function(closeRates) {
+      finalizeRound(round, closeRates);
+    }).catch(function() {
+      finalizeRound(round, round.rates);
+      showToast('Не удалось загрузить актуальные курсы. Использованы курсы открытия раунда.', 'warn');
+    });
   });
 }
 
@@ -1649,8 +1805,8 @@ function addExDeal() {
   var client = document.getElementById('ex-client').value.trim();
   var note   = document.getElementById('ex-note').value.trim();
 
-  if (!ga||!ra||!rt) { alert('Заполни три числовых поля.'); return; }
-  if (gc===rc)       { alert('Валюты должны быть разными.'); return; }
+  if (!ga||!ra||!rt) { showToast('Заполни три числовых поля.', 'err'); return; }
+  if (gc===rc)       { showToast('Валюты должны быть разными.', 'err'); return; }
 
   // rate = 1 giveCur = rt getCur  (e.g. 1 EUR = 1.136 USDT)
   // market value of what we gave, expressed in getCur = ga * rt
@@ -1685,12 +1841,12 @@ function addExDeal() {
   save(); renderExchange();
   } catch(e) {
     console.error('addExDeal error:', e);
-    alert('Ошибка при добавлении сделки: ' + e.message);
+    showToast('Ошибка при добавлении сделки: ' + e.message, 'err');
   }
 }
 
 function undoExDeal() {
-  if (!exState.deals.length) { alert('Нет сделок для отмены'); return; }
+  if (!exState.deals.length) { showToast('Нет сделок для отмены', 'warn'); return; }
   // remove last deal, rebuildRounds recalculates everything
   exState.deals.pop();
   rebuildRounds();
@@ -1737,6 +1893,11 @@ function rebuildRounds() {
     if (!pool || !pool.cur || !pool.originalAmt || !pool.remainingAmt || !pool.costUsdtPerUnit) return;
     livePools.push(pool);
   }
+
+  // Dynamic pool fractions — taken from agent settings, not hardcoded
+  var poolPartnerAgentObj = agentCfg.agents.find(function(a){ return a.id === attrPartnerId; });
+  var poolPartnerFrac = poolPartnerAgentObj ? (poolPartnerAgentObj.pct / 100) : 0.3;
+  var poolOwnerFrac   = 1 - poolPartnerFrac;
 
   // Process deals in order — pools are consumed globally by currency (not by agent/transfers)
   exState.deals.forEach(function(d) {
@@ -1786,21 +1947,21 @@ function rebuildRounds() {
       var coveredCostUsdt = covered * (pool.costUsdtPerUnit || 0);
 
       if (d.getCur === 'usdt') {
-        // Pool closes/partially closes only when sold to USDT, profit split 70/30 owner/partner
+        // Pool closes/partially closes only when sold to USDT, profit split per agent settings
         var realizedUsdt = coveredGetAmt - coveredCostUsdt;
         ensureAgentBuckets('owner');
-        exState.agentProfit['owner'].usdt += realizedUsdt * 0.7;
-        exState.agentSpread['owner'].usdt += realizedUsdt * 0.7;
+        exState.agentProfit['owner'].usdt += realizedUsdt * poolOwnerFrac;
+        exState.agentSpread['owner'].usdt += realizedUsdt * poolOwnerFrac;
         if (attrPartnerId) {
           ensureAgentBuckets(attrPartnerId);
-          exState.agentProfit[attrPartnerId].usdt += realizedUsdt * 0.3;
-          exState.agentSpread[attrPartnerId].usdt += realizedUsdt * 0.3;
+          exState.agentProfit[attrPartnerId].usdt += realizedUsdt * poolPartnerFrac;
+          exState.agentSpread[attrPartnerId].usdt += realizedUsdt * poolPartnerFrac;
         }
         poolLog.push({
           type: 'consumed', date: d.date, time: d.time,
           cur: pool.cur, amount: covered,
           receivedUsdt: coveredGetAmt, costUsdt: coveredCostUsdt,
-          profit: realizedUsdt, profit70: realizedUsdt * 0.7, profit30: realizedUsdt * 0.3,
+          profit: realizedUsdt, profit70: realizedUsdt * poolOwnerFrac, profit30: realizedUsdt * poolPartnerFrac,
           dealId: d.id, poolId: pool.id, partial: covered < pool.remainingAmt + covered
         });
       } else {
@@ -1883,7 +2044,7 @@ function exportExCsv() {
       delete window[cb];
       if (document.body.contains(s)) document.body.removeChild(s);
       btn.innerHTML = '↓ CSV'; btn.disabled = false;
-      if (!data.ok || !data.rows || !data.rows.length) { alert('Нет данных в Google Sheets'); return; }
+      if (!data.ok || !data.rows || !data.rows.length) { showToast('Нет данных в Google Sheets', 'warn'); return; }
       var rows = [['#','Дата','Время','Агент','Отдал','Вал.отдал','Получил','Вал.получил','Курс','Прибыль','%','Клиент','Заметка']];
       data.rows.forEach(function(r, i) {
         rows.push([i+1, r.date||'', r.time||'', (r.agent||'').toUpperCase(),
@@ -1907,7 +2068,7 @@ function exportExCsv() {
 }
 
 function exportExCsvLocal() {
-  if (!exState.deals.length) { alert('Нет сделок'); return; }
+  if (!exState.deals.length) { showToast('Нет сделок для экспорта', 'warn'); return; }
   var rows = [['#','Дата','Время','Агент','Отдал','Вал.отдал','Получил','Вал.получил','Курс','Прибыль','%','Клиент','Заметка']];
   exState.deals.forEach(function(d, i) {
     rows.push([i+1, d.date, d.time, (d.agent||'').toUpperCase(),
@@ -1933,10 +2094,13 @@ function downloadCsv(rows, filename) {
 }
 
 function resetEx() {
-  if (!confirm('Сбросить все данные обменника?')) return;
-  if (!confirm('Точно? Это действие необратимо.')) return;
-  exState = freshExState();
-  save(); renderExchange();
+  showConfirm('Сбросить все данные обменника?', 'Это действие необратимо.', function() {
+    showConfirm('Точно уверен?', 'Все сделки, капитал и история будут удалены навсегда.', function() {
+      exState = freshExState();
+      save(); renderExchange();
+      showToast('Данные сброшены', 'ok');
+    }, 'Сбросить всё', 'btn-r');
+  });
 }
 
 // ================================================================
@@ -1999,7 +2163,7 @@ document.getElementById('btn-cf-add').addEventListener('click', function() {
   var cur  = document.getElementById('cf-cur').value;
   var amt  = parseFloat(document.getElementById('cf-amt').value);
   var note = document.getElementById('cf-note').value.trim();
-  if (!amt) { alert('Введи сумму'); return; }
+  if (!amt) { showToast('Введи сумму', 'err'); return; }
   if (!exState.cashflows) exState.cashflows = [];
   exState.cashflows.push({type:type, cur:cur, amt:amt, note:note, date:today()});
   document.getElementById('cf-amt').value = '';
@@ -2029,8 +2193,8 @@ document.getElementById('btn-tr-add').addEventListener('click', function() {
   var cur  = document.getElementById('tr-cur').value;
   var amt  = parseFloat(document.getElementById('tr-amt').value);
   var note = document.getElementById('tr-note').value.trim();
-  if (!amt || amt <= 0) { alert('Введи сумму'); return; }
-  if (from === to) { alert('Нельзя перевести самому себе'); return; }
+  if (!amt || amt <= 0) { showToast('Введи сумму', 'err'); return; }
+  if (from === to) { showToast('Нельзя перевести самому себе', 'err'); return; }
   if (!exState.cashflows) exState.cashflows = [];
   exState.cashflows.push({type:'transfer', _id: 'tr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), fromAgent:from, toAgent:to, cur:cur, amt:amt, note:note, date:today()});
   document.getElementById('tr-amt').value = '';
@@ -2610,7 +2774,7 @@ function reportYesterday() {
 function runReport(reportDateStr) {
   var todayStr  = reportDateStr;
   var todayDeals = exState.deals.filter(function(d){ return d.date === todayStr; });
-  if (!todayDeals.length) { alert("За " + todayStr + " сделок нет"); return; }
+  if (!todayDeals.length) { showToast('За ' + todayStr + ' сделок нет', 'warn'); return; }
 
   // — Open round
   var openR2 = exState.openRound2
@@ -2642,7 +2806,8 @@ function runReport(reportDateStr) {
     totalVolume += vol;
   });
 
-  // — Agent spread (by deal)
+  // — Agent spread (by deal) — filtered to todayDeals only for day report.
+  // exState.agentSpread is cumulative (all time), so we recalculate here per-day intentionally.
   var agentDaySpread = {};
   allAgentIds.forEach(function(id){ agentDaySpread[id] = {}; });
   todayDeals.forEach(function(d) {
@@ -2801,6 +2966,37 @@ function runReport(reportDateStr) {
       lines.push("  " + a.name + ": " + parts.join(" · "));
     });
 
+    // — Attribution pool P&L for today
+    var todayPoolLog = (exState.poolLog || []).filter(function(e){
+      return e.type === 'consumed' && e.date === todayStr;
+    });
+    if (todayPoolLog.length) {
+      var poolTotalProfit = todayPoolLog.reduce(function(s,e){ return s + (e.profit||0); }, 0);
+      var poolOwnerProfit = todayPoolLog.reduce(function(s,e){ return s + (e.profit70||0); }, 0);
+      var poolPartnerProfit = todayPoolLog.reduce(function(s,e){ return s + (e.profit30||0); }, 0);
+      var attrPartnerObj = getAgent(getAttrPartnerId());
+      var partnerNameRpt = attrPartnerObj ? attrPartnerObj.name : 'Партнёр';
+      var ownerNameRpt   = agentCfg.ownerName || 'Владелец';
+      lines.push("");
+      lines.push("🔗 Атрибуционные пулы (сегодня):");
+      lines.push("  Транзакций: " + todayPoolLog.length
+        + "  →  " + (poolTotalProfit>=0?"+":"") + poolTotalProfit.toFixed(2) + " USDT");
+      lines.push("    " + ownerNameRpt + ": " + (poolOwnerProfit>=0?"+":"") + poolOwnerProfit.toFixed(2) + " USDT");
+      lines.push("    " + partnerNameRpt + ": " + (poolPartnerProfit>=0?"+":"") + poolPartnerProfit.toFixed(2) + " USDT");
+    }
+    var activePools = exState.attributionPools || [];
+    if (activePools.length) {
+      var poolSummary = activePools.map(function(p){
+        return (p.cur||'').toUpperCase() + ' ' + fmt(p.remainingAmt, p.cur);
+      }).join(' · ');
+      var totalPoolUsdt = activePools.reduce(function(s,p){
+        return s + (p.remainingAmt||0) * (p.costUsdtPerUnit||0);
+      }, 0);
+      lines.push("  Активных пулов: " + activePools.length
+        + " (" + poolSummary + ")"
+        + "  ≈ " + totalPoolUsdt.toFixed(2) + " USDT");
+    }
+
     if (openR2) {
       var totalUnreal = 0;
       var unrealParts = [];
@@ -2828,14 +3024,14 @@ function runReport(reportDateStr) {
   function copyReport(text) {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(function() {
-        alert("Отчёт скопирован в буфер обмена");
+        showToast('Отчёт скопирован в буфер обмена', 'ok');
       });
     } else {
       var ta = document.createElement("textarea");
       ta.value = text; document.body.appendChild(ta);
       ta.select(); document.execCommand("copy");
       document.body.removeChild(ta);
-      alert("Отчёт скопирован в буфер обмена");
+      showToast('Отчёт скопирован в буфер обмена', 'ok');
     }
   }
 
@@ -2884,26 +3080,23 @@ document.getElementById("imp-file").addEventListener("change", function(e) {
   reader.onload = function(ev) {
     try {
       var data = JSON.parse(ev.target.result);
-      if (!data.exState || !data.exState.deals) { alert("Неверный формат файла"); return; }
-      if (!confirm("Загрузить данные из файла? Текущие данные будут заменены.")) return;
-      exState = data.exState;
-      if (data.shState) shState = data.shState;
-      // Run migration
-      if (!exState.cashflows) exState.cashflows = [];
-      if (!exState.closedRounds) exState.closedRounds = [];
-      rebuildRounds();
-      save();
-      // Sync capital inputs
-      CURS.forEach(function(c) {
-        var el = document.getElementById("cap-"+c);
-        if (el) el.value = exState.capital[c] || 0;
+      if (!data.exState || !data.exState.deals) { showToast('Неверный формат файла', 'err'); return; }
+      showConfirm('Загрузить данные из файла?', 'Текущие данные будут заменены.', function() {
+        exState = data.exState;
+        if (data.shState) shState = data.shState;
+        if (!exState.cashflows) exState.cashflows = [];
+        if (!exState.closedRounds) exState.closedRounds = [];
+        rebuildRounds();
+        save();
+        CURS.forEach(function(c) {
+          var el = document.getElementById("cap-"+c);
+          if (el) el.value = exState.capital[c] || 0;
+        });
+        renderExchange();
+        showToast('Данные загружены успешно', 'ok');
       });
-      var a2el = document.getElementById("a2-pct");
-      if (a2el) a2el.value = exState.a2pct;
-      renderExchange();
-      alert("Данные загружены успешно");
     } catch(err) {
-      alert("Ошибка чтения файла: " + err.message);
+      showToast('Ошибка чтения файла: ' + err.message, 'err');
     }
   };
   reader.readAsText(file);
@@ -3077,11 +3270,11 @@ document.getElementById('sh-sale-cur').addEventListener('change', function(){
 function addShIncome() {
   var type=document.getElementById('sh-income-type').value;
   var amt=parseFloat(document.getElementById('sh-income-amt').value);
-  if(!amt){alert('Введи сумму');return;}
+  if(!amt){showToast('Введи сумму', 'err');return;}
   var usd,rate=0;
   if(type==='uah'){
     rate=parseFloat(document.getElementById('sh-income-rate').value);
-    if(!rate){alert('Введи курс');return;}
+    if(!rate){showToast('Введи курс', 'err');return;}
     usd=amt/rate;
   } else { usd=amt; }
   shState.incomes.push({type:type,amount:amt,rate:rate,usd:usd,date:today()});
@@ -3097,11 +3290,11 @@ function addShSale() {
   var cur=document.getElementById('sh-sale-cur').value;
   var cost=parseFloat(document.getElementById('sh-cost').value);
   var note=document.getElementById('sh-note').value.trim();
-  if(!amt||!cost){alert('Заполни сумму и себестоимость');return;}
+  if(!amt||!cost){showToast('Заполни сумму и себестоимость', 'err');return;}
   var saleUsd,saleRate=0;
   if(cur==='uah'){
     saleRate=parseFloat(document.getElementById('sh-sale-rate').value);
-    if(!saleRate){alert('Введи курс');return;}
+    if(!saleRate){showToast('Введи курс', 'err');return;}
     saleUsd=amt/saleRate;
   } else { saleUsd=amt; }
   var profit=saleUsd-cost;
@@ -3131,13 +3324,16 @@ function undoShLast(){
     shState.usdPool-=shState.incomes[shState.incomes.length-1].usd;
     shState.incomes.pop(); save(); renderShop(); return;
   }
-  alert('Нет записей');
+  showToast('Нет записей для отмены', 'warn');
 }
 
 function resetShop(){
-  if(!confirm('Сбросить магазин?'))return;
-  if(!confirm('Точно?'))return;
-  shState=freshShState(); save(); renderShop();
+  showConfirm('Сбросить магазин?', 'Все записи будут удалены.', function() {
+    showConfirm('Точно?', 'Это действие необратимо.', function() {
+      shState=freshShState(); save(); renderShop();
+      showToast('Магазин сброшен', 'ok');
+    }, 'Сбросить', 'btn-r');
+  });
 }
 
 function exportShCsv(){
@@ -3473,7 +3669,7 @@ document.getElementById('btn-add-agent').addEventListener('click', function() {
 document.getElementById('agents-save-btn').addEventListener('click', function() {
   var total = agentCfgDraft.reduce(function(s,a){ return s+(parseFloat(a.pct)||0); }, 0);
   if (total > 100) {
-    alert('Сумма долей агентов превышает 100% (' + total.toFixed(1) + '%). Скорректируй проценты.');
+    showToast('Сумма долей агентов превышает 100% (' + total.toFixed(1) + '%). Скорректируй проценты.', 'warn');
     return;
   }
   agentCfg.agents   = agentCfgDraft.map(function(a){ return {id:a.id, name:a.name, pct:parseFloat(a.pct)||0}; });
@@ -3940,7 +4136,7 @@ var gsPreviewDeals = [];
 
 document.getElementById('gs-fetch-btn').addEventListener('click', function() {
   var url = document.getElementById('gs-url').value.trim();
-  if (!url) { alert('Введи URL Apps Script деплоя'); return; }
+  if (!url) { showToast('Введи URL Apps Script деплоя', 'err'); return; }
   localStorage.setItem('gs_url', url);
 
   var btn = document.getElementById('gs-fetch-btn');
@@ -4001,7 +4197,7 @@ document.getElementById('gs-fetch-btn').addEventListener('click', function() {
     if (results.deals && results.deals.ok && results.deals.rows) {
       processGsRows(results.deals.rows);
     } else {
-      alert('Ошибка загрузки сделок: ' + ((results.deals && results.deals.error) || 'Нет данных'));
+      showToast('Ошибка загрузки сделок: ' + ((results.deals && results.deals.error) || 'Нет данных'), 'err');
     }
 
     // Rebuild with new capital and transfers already applied

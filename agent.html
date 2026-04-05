@@ -247,7 +247,7 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
         <!-- giveCur=USDT: по умолчанию выключена — USDT берём у владельца -->
         <div id="usdt-from-owner-row" style="display:none;margin-bottom:8px;background:rgba(180,139,247,.08);border:1px solid rgba(180,139,247,.25);border-radius:8px;padding:10px 12px;">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--czk);">
-            <input type="checkbox" id="usdt-from-owner" style="width:16px;height:16px;accent-color:var(--czk);">
+            <input type="checkbox" id="usdt-from-owner" checked style="width:16px;height:16px;accent-color:var(--czk);">
             USDT беру у владельца
           </label>
           <div style="font-size:10px;color:var(--muted);margin-top:4px;margin-left:24px;">Включить если USDT идут с кошелька владельца</div>
@@ -787,7 +787,8 @@ function resetFormAfterAdd() {
   if (rowFrom) {
     var showFrom = !IS_OWNER && gc === 'usdt';
     rowFrom.style.display = showFrom ? '' : 'none';
-    if (!showFrom) document.getElementById('usdt-from-owner').checked = false;
+    if (showFrom) document.getElementById('usdt-from-owner').checked = true;
+    else document.getElementById('usdt-from-owner').checked = false;
   }
   if (rowTo) {
     var showTo = !IS_OWNER && rc === 'usdt';
@@ -1130,6 +1131,24 @@ function showToast(msg, isError) {
 }
 
 updateRateLabel();
+
+// Init checkbox visibility on page load based on default select values
+(function initCheckboxVisibility() {
+  var gc = document.getElementById('give-cur').value;
+  var rc = document.getElementById('get-cur').value;
+  var rowFrom = document.getElementById('usdt-from-owner-row');
+  var rowTo   = document.getElementById('usdt-to-owner-row');
+  if (rowFrom) {
+    var showFrom = !IS_OWNER && gc === 'usdt';
+    rowFrom.style.display = showFrom ? '' : 'none';
+    if (!showFrom) document.getElementById('usdt-from-owner').checked = false;
+  }
+  if (rowTo) {
+    var showTo = !IS_OWNER && rc === 'usdt';
+    rowTo.style.display = showTo ? '' : 'none';
+    if (!showTo) document.getElementById('usdt-to-owner').checked = false;
+  }
+})();
 </script>
 </body>
 </html>

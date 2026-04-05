@@ -916,6 +916,38 @@ function syncCapital() {
 function today() { var d=new Date(); return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); }
 function now()   { var d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
+/** Sort key for dd.mm (same calendar year assumed) */
+function _dealDateKey(dm) {
+  var m = String(dm || '').match(/(\d{1,2})\.(\d{1,2})/);
+  if (!m) return 0;
+  return parseInt(m[2], 10) * 100 + parseInt(m[1], 10);
+}
+/** Minutes since midnight from "HH:MM" or locale time string */
+function _dealTimeKey(t) {
+  if (!t) return 0;
+  var m = String(t).match(/(\d{1,2}):(\d{2})/);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 0;
+}
+/**
+ * Stable chronological order for attribution pools & balances.
+ * Google Sheets JSON order is arbitrary — use date, time, _gsRow, then id.
+ */
+function sortDealsChronologically(deals) {
+  if (!deals || deals.length < 2) return;
+  deals.sort(function(a, b) {
+    var dk = _dealDateKey(a.date) - _dealDateKey(b.date);
+    if (dk !== 0) return dk;
+    var tk = _dealTimeKey(a.time) - _dealTimeKey(b.time);
+    if (tk !== 0) return tk;
+    var ra = a._gsRow != null ? Number(a._gsRow) : NaN;
+    var rb = b._gsRow != null ? Number(b._gsRow) : NaN;
+    if (!isNaN(ra) && !isNaN(rb) && ra !== rb) return ra - rb;
+    var ida = Number(a.id), idb = Number(b.id);
+    if (!isNaN(ida) && !isNaN(idb) && ida !== idb) return ida - idb;
+    return 0;
+  });
+}
+
 // ================================================================
 // ROUND LOGIC
 // ================================================================
@@ -1867,6 +1899,8 @@ function deleteExDeal(id) {
 // Base currency = giveCur of the first deal that opened the round
 // Profit = total getCur received minus total giveCur spent, converted to USDT
 function rebuildRounds() {
+  sortDealsChronologically(exState.deals);
+
   var tempBal = {eur:0,huf:0,usdt:0,usd:0,czk:0};
 
   exState.deals.forEach(function(d) {
@@ -3445,7 +3479,7 @@ setTimeout(function autoLoadOnStartup() {
       });
     });
     if (newDeals.length > 0) {
-      newDeals.sort(function(a,b){ return a.id - b.id; });
+      sortDealsChronologically(newDeals);
       // Auto-open round only for today's deals (prevents old imported data from opening stale rounds)
       if (!exState.openRound2) {
         var todayNew = newDeals.filter(function(d){ return d.date === today(); });
@@ -4368,8 +4402,7 @@ document.getElementById('gs-confirm-btn').addEventListener('click', function() {
     added++;
   });
   if (added > 0) {
-    // Sort by deal id (timestamp-based) before inserting
-    newDeals.sort(function(a,b){ return a.id - b.id; });
+    sortDealsChronologically(newDeals);
     // Auto-open round before first deal if none is open
     if (!exState.openRound2 && newDeals.length > 0) {
       autoOpenRound(newDeals[0]);

@@ -270,8 +270,15 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
     <div class="btn-row" style="margin-top:8px;flex-wrap:wrap;gap:6px;">
       <button class="btn btn-g" id="btn-gsheets" style="font-size:10px;padding:9px 11px;">⬇ Google Sheets</button>
       <button class="btn btn-o" id="btn-ex-analytics">📈 Аналитика</button>
-      <button class="btn btn-o" id="btn-ex-report">📋 Отчёт</button>
       <button class="btn btn-o" id="btn-term-links" style="font-size:10px;padding:9px 11px;">🔗 Терминалы</button>
+    </div>
+    <!-- TG Report inline date picker -->
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;padding:8px 10px;background:var(--s1);border:1px solid var(--border);border-radius:10px;">
+      <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-right:2px;">📋 Отчёт TG</span>
+      <button class="btn btn-o period-btn" id="rbtn-today">Сегодня</button>
+      <button class="btn btn-o period-btn" id="rbtn-yesterday">Вчера</button>
+      <input type="date" id="report-date-picker"
+             style="background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;outline:none;cursor:pointer;">
     </div>
   </div>
 
@@ -486,28 +493,6 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
   <div class="log-list" id="sh-log"></div>
 </div>
 
-<!-- ===== REPORT DATE MODAL ===== -->
-<div class="modal-overlay hidden" id="report-date-modal">
-  <div class="modal" style="width:360px;">
-    <div class="modal-title">
-      <button class="modal-close" id="report-modal-close">✕</button>
-      📋 ОТЧЁТ — ВЫБОР ДАТЫ
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
-      <button class="btn btn-g" id="rbtn-today" style="flex:1;padding:12px 6px;font-size:11px;">Сегодня</button>
-      <button class="btn btn-o" id="rbtn-yesterday" style="flex:1;padding:12px 6px;font-size:11px;">Вчера</button>
-    </div>
-    <div class="field" style="margin-bottom:16px;">
-      <label style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:6px;">Другая дата (дд.мм)</label>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="report-date-input" placeholder="03.04" maxlength="5"
-               style="background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;padding:12px 14px;outline:none;flex:1;">
-        <button class="btn btn-g" id="rbtn-custom" style="padding:12px 16px;">→</button>
-      </div>
-    </div>
-    <div id="report-date-hint" style="font-size:10px;color:var(--muted);min-height:16px;"></div>
-  </div>
-</div>
 
 <div class="modal-overlay hidden" id="analytics-modal">
   <div class="modal" style="width:1060px;max-width:97vw;">
@@ -2489,17 +2474,21 @@ document.getElementById('btn-an-apply').addEventListener('click', function(){
   if (activeAnTab === 'rates') renderRatesChart(); else renderAnalytics();
 });
 document.getElementById('btn-an-pdf').addEventListener('click', function(){
+  // ── Force-render both charts without animation so toDataURL captures them ──
+  applyPeriod(analyticsState.period || 'month');
+  if (analyticsChart)  analyticsChart.update('none');
+  renderRatesChart();
+  if (ratesChart) ratesChart.update('none');
+
   var d = new Date();
   var dateStr = String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + d.getFullYear();
 
-  // ── Helper: build number formatter (locale-safe)
   function fmtN(n, dec) {
     return (Math.round(n * Math.pow(10, dec||0)) / Math.pow(10, dec||0)).toLocaleString('ru');
   }
 
   var html = '';
 
-  // ── Page 1: Analytics header ──
   html += '<h1>Business Tracker — Аналитика</h1>';
   html += '<p style="color:#666;margin-bottom:12px;">' + dateStr + '</p>';
 
@@ -2520,22 +2509,26 @@ document.getElementById('btn-an-pdf').addEventListener('click', function(){
     html += '</div>';
   }
 
-  // P&L chart (always include even if rates tab is active)
+  // P&L chart
   var pnlCanvas = document.getElementById('an-profit-chart');
-  if (pnlCanvas) {
+  if (pnlCanvas && pnlCanvas.width > 0 && pnlCanvas.height > 0) {
     try {
       html += '<h2>График прибыли</h2>';
       html += '<img src="' + pnlCanvas.toDataURL('image/png') + '" style="width:100%;">';
-    } catch(e) {}
+    } catch(e) {
+      html += '<p style="color:#999;font-size:9pt;">График прибыли недоступен: ' + e.message + '</p>';
+    }
   }
 
   // Rates chart
   var ratesCanvas = document.getElementById('an-rates-chart');
-  if (ratesCanvas) {
+  if (ratesCanvas && ratesCanvas.width > 0 && ratesCanvas.height > 0) {
     try {
       html += '<h2>Сравнительные курсы</h2>';
       html += '<img src="' + ratesCanvas.toDataURL('image/png') + '" style="width:100%;">';
-    } catch(e) {}
+    } catch(e) {
+      html += '<p style="color:#999;font-size:9pt;">График курсов недоступен: ' + e.message + '</p>';
+    }
   }
 
   // Metrics table
@@ -2879,52 +2872,22 @@ function runReport(reportDateStr) {
     .catch(function(){ copyReport(buildReport(null)); });
 }
 
-// Open date-picker modal on button click
-document.getElementById("btn-ex-report").addEventListener("click", function() {
-  var modal = document.getElementById('report-date-modal');
-  var inp   = document.getElementById('report-date-input');
-  var hint  = document.getElementById('report-date-hint');
-  inp.value = '';
-  hint.textContent = '';
-  // Pre-fill hint with date counts
-  var tStr = today(); var yStr = reportYesterday();
-  var tCnt = exState.deals.filter(function(d){ return d.date === tStr; }).length;
-  var yCnt = exState.deals.filter(function(d){ return d.date === yStr; }).length;
-  document.getElementById('rbtn-today').textContent     = 'Сегодня (' + tStr + ')' + (tCnt ? ' · ' + tCnt + ' сд.' : '');
-  document.getElementById('rbtn-yesterday').textContent = 'Вчера (' + yStr + ')'   + (yCnt ? ' · ' + yCnt + ' сд.' : '');
-  modal.classList.remove('hidden');
-});
-
-document.getElementById('report-modal-close').addEventListener('click', function(){
-  document.getElementById('report-date-modal').classList.add('hidden');
-});
-
-document.getElementById('report-date-modal').addEventListener('click', function(e){
-  if (e.target === this) this.classList.add('hidden');
-});
-
+// TG Report — inline date controls
 document.getElementById('rbtn-today').addEventListener('click', function(){
-  document.getElementById('report-date-modal').classList.add('hidden');
   runReport(today());
 });
 
 document.getElementById('rbtn-yesterday').addEventListener('click', function(){
-  document.getElementById('report-date-modal').classList.add('hidden');
   runReport(reportYesterday());
 });
 
-document.getElementById('rbtn-custom').addEventListener('click', function(){
-  var val = document.getElementById('report-date-input').value.trim();
-  if (!/^\d{2}\.\d{2}$/.test(val)) {
-    document.getElementById('report-date-hint').textContent = 'Введите дату в формате дд.мм';
-    return;
-  }
-  document.getElementById('report-date-modal').classList.add('hidden');
-  runReport(val);
-});
-
-document.getElementById('report-date-input').addEventListener('keydown', function(e){
-  if (e.key === 'Enter') document.getElementById('rbtn-custom').click();
+document.getElementById('report-date-picker').addEventListener('change', function(){
+  var val = this.value; // yyyy-mm-dd
+  if (!val) return;
+  // Convert to dd.mm
+  var ddmm = val.slice(8,10) + '.' + val.slice(5,7);
+  runReport(ddmm);
+  this.value = ''; // reset picker so same date can be re-selected
 });
 
 // ================================================================

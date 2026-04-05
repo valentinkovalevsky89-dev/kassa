@@ -996,8 +996,19 @@ function loadBalance() {
       var rc = (r.getcur   || '').toLowerCase();
       var ga = parseFloat(r.giveamount) || 0;
       var ra = parseFloat(r.getamount)  || 0;
-      if (CURS2.indexOf(gc) !== -1) bal[gc] -= ga;
-      if (CURS2.indexOf(rc) !== -1) bal[rc] += ra;
+      var isPool  = String(r.pool_flag   || '').trim() === '1' || String(r.pool_flag   || '').toLowerCase() === 'true';
+      var toOwner = String(r.usdttoowner || '').trim() === '1' || String(r.usdttoowner || '').toLowerCase() === 'true';
+
+      if (isPool && gc === 'usdt') {
+        // Owner's USDT was used — don't debit co-owner's USDT, only credit received currency
+        if (CURS2.indexOf(rc) !== -1) bal[rc] += ra;
+      } else if (toOwner && rc === 'usdt') {
+        // USDT returns to owner — debit given currency, don't credit USDT to co-owner
+        if (CURS2.indexOf(gc) !== -1) bal[gc] -= ga;
+      } else {
+        if (CURS2.indexOf(gc) !== -1) bal[gc] -= ga;
+        if (CURS2.indexOf(rc) !== -1) bal[rc] += ra;
+      }
     });
 
     // 2. Transfers — agent gave or received funds (имя или agentId из ссылки)

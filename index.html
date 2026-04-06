@@ -852,6 +852,7 @@ function load() {
       if (d.poolFlag === undefined) d.poolFlag = !!(d.usdtFromOwner);
       if (d.usdtToOwner === undefined) d.usdtToOwner = false;
     });
+    normalizeExStateDates();
   } catch(e) {
     console.log('localStorage unavailable, using memory');
   }
@@ -915,6 +916,48 @@ function syncCapital() {
 }
 function today() { var d=new Date(); return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); }
 function now()   { var d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+/** Приводит дату сделки/отчёта к DD.MM для TG-отчёта и аналитики */
+function normalizeDealDate(s) {
+  if (s === undefined || s === null) return '';
+  var t = String(s).trim();
+  if (!t) return '';
+  if (/^\d{2}\.\d{2}$/.test(t)) return t;
+  var m = t.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
+  if (m) {
+    return String(parseInt(m[1], 10)).padStart(2, '0') + '.' + String(parseInt(m[2], 10)).padStart(2, '0');
+  }
+  var m2 = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m2) return m2[3] + '.' + m2[2];
+  var d = new Date(t);
+  if (!isNaN(d.getTime())) {
+    return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+  return t;
+}
+
+function normalizeExStateDates() {
+  (exState.deals || []).forEach(function(d) {
+    if (d.date) d.date = normalizeDealDate(d.date);
+  });
+  (exState.cashflows || []).forEach(function(cf) {
+    if (cf.date) cf.date = normalizeDealDate(cf.date);
+  });
+  (exState.rounds2 || []).forEach(function(r) {
+    if (r.openedDate) r.openedDate = normalizeDealDate(r.openedDate);
+    if (r.closedDate) r.closedDate = normalizeDealDate(r.closedDate);
+  });
+  (exState.attributionPools || []).forEach(function(p) {
+    if (p.date) p.date = normalizeDealDate(p.date);
+  });
+}
+
+/** Если openRound2 указывает на закрытый или отсутствующий раунд — сброс */
+function repairStaleOpenRound() {
+  if (!exState.openRound2) return;
+  var r = (exState.rounds2 || []).find(function(x) { return x.id === exState.openRound2; });
+  if (!r || r.status !== 'open') exState.openRound2 = null;
+}
 
 /** Sort key for dd.mm (same calendar year assumed) */
 function _dealDateKey(dm) {
@@ -1474,7 +1517,7 @@ function autoOpenRound(triggerDeal) {
   var round = {
     id: triggerDeal.id - 1,
     name: name,
-    openedDate: today(),
+    openedDate: normalizeDealDate(today()),
     openedTime: now(),
     snapshot: snapshot,
     snapshotUsdt: snapUsdt,
@@ -1509,7 +1552,7 @@ function openRound2() {
     var round = {
       id: Date.now(),
       name: name,
-      openedDate: today(),
+      openedDate: normalizeDealDate(today()),
       openedTime: now(),
       snapshot: snapshot,
       snapshotUsdt: snapUsdt,
@@ -1529,7 +1572,7 @@ function openRound2() {
     var round = {
       id: Date.now(),
       name: name,
-      openedDate: today(),
+      openedDate: normalizeDealDate(today()),
       openedTime: now(),
       snapshot: snapshot,
       snapshotUsdt: snapUsdt,
@@ -1600,7 +1643,7 @@ function finalizeRound(round, closeRates) {
   }
 
   round.status         = 'closed';
-  round.closedDate     = today();
+  round.closedDate     = normalizeDealDate(today());
   round.closedTime     = now();
   round.closedUsdt     = closedUsdt;
   round.closeRates     = closeRates;
@@ -1847,10 +1890,11 @@ function addExDeal() {
   var profit = ra - mv;
   var pct    = mv > 0 ? ((profit/mv)*100).toFixed(1) : '0.0';
 
+  repairStaleOpenRound();
   var deal = {
     id:Date.now(), giveCur:gc, giveAmount:ga, getCur:rc, getAmount:ra,
     rate:rt, profit:profit, pct:pct, agent:agent, client:client, note:note,
-    date:today(), time:now(),
+    date:normalizeDealDate(today()), time:now(),
     usdtToOwner:false, poolFlag:false
   };
 
@@ -2257,8 +2301,9 @@ document.getElementById("btn-ex-reset").addEventListener("click", resetEx);
 var analyticsState = {period:'day'};
 var analyticsChart = null;
 function ddmmToDate(s) {
-  if (!s || !/^\d{2}\.\d{2}/.test(s)) return null;
-  var p = s.split('.');
+  var n = normalizeDealDate(s);
+  if (!n || !/^\d{2}\.\d{2}$/.test(n)) return null;
+  var p = n.split('.');
   var y = new Date().getFullYear();
   var d = new Date(y, parseInt(p[1],10)-1, parseInt(p[0],10), 0, 0, 0, 0);
   return isNaN(d) ? null : d;
@@ -2298,13 +2343,15 @@ function renderAnalytics() {
   var dayMap = {};
   var byCur = {usdt:0,eur:0,huf:0,usd:0,czk:0};
   deals.forEach(function(d){
-    var key = d.date;
-    if (!dayMap[key]) dayMap[key] = {usdt:0,eur:0,huf:0};
+    var key = normalizeDealDate(d.date) || d.date;
+    if (!dayMap[key]) dayMap[key] = {usdt:0,eur:0,huf:0,usd:0,czk:0};
     if (byCur[d.getCur] !== undefined) byCur[d.getCur] += d.profit;
-    // Accumulate profit per day per currency
-    if (d.getCur === 'usdt') dayMap[key].usdt += d.profit;
-    else if (d.getCur === 'eur') dayMap[key].eur += d.profit;
-    else if (d.getCur === 'huf') dayMap[key].huf += d.profit;
+    var gc = d.getCur;
+    if (gc === 'usdt') dayMap[key].usdt += d.profit;
+    else if (gc === 'eur') dayMap[key].eur += d.profit;
+    else if (gc === 'huf') dayMap[key].huf += d.profit;
+    else if (gc === 'usd') dayMap[key].usd += d.profit;
+    else if (gc === 'czk') dayMap[key].czk += d.profit;
   });
   var labels = Object.keys(dayMap).sort(function(a,b){
     return (ddmmToDate(a)||new Date(0)) - (ddmmToDate(b)||new Date(0));
@@ -2312,28 +2359,35 @@ function renderAnalytics() {
   var vUsdt = labels.map(function(k){ return +(dayMap[k].usdt || 0).toFixed(2); });
   var vEur  = labels.map(function(k){ return +(dayMap[k].eur  || 0).toFixed(2); });
   var vHuf  = labels.map(function(k){ return +Math.round(dayMap[k].huf || 0); });
+  var vUsd  = labels.map(function(k){ return +(dayMap[k].usd || 0).toFixed(2); });
+  var vCzk  = labels.map(function(k){ return +Math.round(dayMap[k].czk || 0); });
 
   var totalUsdt = byCur.usdt;
   var kpi = '<div class="k"><div class="l">Сделок</div><div class="v">'+deals.length+'</div></div>'
     + '<div class="k"><div class="l">P&L USDT</div><div class="v" style="color:'+(totalUsdt>=0?'var(--green)':'var(--red)')+'">'+(totalUsdt>=0?'+':'')+totalUsdt.toFixed(2)+'</div></div>'
     + '<div class="k"><div class="l">EUR P&L</div><div class="v" style="color:var(--eur)">'+(byCur.eur>=0?'+':'')+byCur.eur.toFixed(2)+'</div></div>'
-    + '<div class="k"><div class="l">HUF P&L</div><div class="v" style="color:var(--czk)">'+(byCur.huf>=0?'+':'')+Math.round(byCur.huf).toLocaleString('ru')+'</div></div>';
+    + '<div class="k"><div class="l">HUF P&L</div><div class="v" style="color:var(--huf)">'+(byCur.huf>=0?'+':'')+Math.round(byCur.huf).toLocaleString('ru')+'</div></div>'
+    + '<div class="k"><div class="l">USD P&L</div><div class="v" style="color:var(--usd)">'+(byCur.usd>=0?'+':'')+byCur.usd.toFixed(2)+'</div></div>'
+    + '<div class="k"><div class="l">CZK P&L</div><div class="v" style="color:var(--czk)">'+(byCur.czk>=0?'+':'')+Math.round(byCur.czk).toLocaleString('ru')+'</div></div>';
   document.getElementById('an-kpi').innerHTML = kpi;
   document.getElementById('an-by-cur').innerHTML =
     '<div class="chart-title">P&L по валютам</div>'
     + '<div class="c-sub" style="color:var(--usdt);font-weight:700">USDT: '+(byCur.usdt>=0?'+':'')+byCur.usdt.toFixed(2)+'</div>'
     + '<div class="c-sub" style="color:var(--eur);font-weight:700">EUR: '+(byCur.eur>=0?'+':'')+byCur.eur.toFixed(2)+'</div>'
-    + '<div class="c-sub" style="color:var(--czk);font-weight:700">HUF: '+(byCur.huf>=0?'+':'')+Math.round(byCur.huf).toLocaleString('ru')+'</div>';
+    + '<div class="c-sub" style="color:var(--huf);font-weight:700">HUF: '+(byCur.huf>=0?'+':'')+Math.round(byCur.huf).toLocaleString('ru')+'</div>'
+    + '<div class="c-sub" style="color:var(--usd);font-weight:700">USD: '+(byCur.usd>=0?'+':'')+byCur.usd.toFixed(2)+'</div>'
+    + '<div class="c-sub" style="color:var(--czk);font-weight:700">CZK: '+(byCur.czk>=0?'+':'')+Math.round(byCur.czk).toLocaleString('ru')+'</div>';
 
   var ctx = document.getElementById('an-profit-chart');
   if (!ctx || !window.Chart) return;
   if (analyticsChart) analyticsChart.destroy();
 
-  // Build datasets — only include currencies that have at least one non-zero day
   var datasets = [];
   var hasUsdt = vUsdt.some(function(v){ return v !== 0; });
   var hasEur  = vEur.some(function(v){ return v !== 0; });
   var hasHuf  = vHuf.some(function(v){ return v !== 0; });
+  var hasUsd  = vUsd.some(function(v){ return v !== 0; });
+  var hasCzk  = vCzk.some(function(v){ return v !== 0; });
 
   if (hasUsdt) datasets.push({
     label: 'USDT',
@@ -2359,8 +2413,23 @@ function renderAnalytics() {
     tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2,
     yAxisID: 'yHuf'
   });
+  if (hasUsd) datasets.push({
+    label: 'USD',
+    data: vUsd,
+    borderColor: '#ff5c7a',
+    backgroundColor: 'rgba(255,92,122,0.10)',
+    tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2,
+    yAxisID: 'yUsd'
+  });
+  if (hasCzk) datasets.push({
+    label: 'CZK',
+    data: vCzk,
+    borderColor: '#b48bf7',
+    backgroundColor: 'rgba(180,139,247,0.08)',
+    tension: 0.3, fill: false, pointRadius: 4, borderWidth: 2,
+    yAxisID: 'yCzk'
+  });
 
-  // If no data at all — show placeholder
   if (!datasets.length) {
     datasets.push({
       label: 'Нет данных',
@@ -2372,7 +2441,6 @@ function renderAnalytics() {
   var scales = {
     x: { ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' } }
   };
-  // Only add y-axes for currencies that exist
   if (hasUsdt) scales.yUsdt = {
     type: 'linear', position: 'left',
     ticks: { color: '#26d9a0' }, grid: { color: 'rgba(74,88,120,0.25)' },
@@ -2388,7 +2456,17 @@ function renderAnalytics() {
     ticks: { color: '#b48bf7' }, grid: { drawOnChartArea: false },
     title: { display: true, text: 'HUF', color: '#b48bf7', font: { size: 10 } }
   };
-  if (!hasUsdt && !hasEur && !hasHuf) scales.y = {
+  if (hasUsd) scales.yUsd = {
+    type: 'linear', position: 'right',
+    ticks: { color: '#ff5c7a' }, grid: { drawOnChartArea: false },
+    title: { display: true, text: 'USD', color: '#ff5c7a', font: { size: 10 } }
+  };
+  if (hasCzk) scales.yCzk = {
+    type: 'linear', position: 'right',
+    ticks: { color: '#b48bf7' }, grid: { drawOnChartArea: false },
+    title: { display: true, text: 'CZK', color: '#b48bf7', font: { size: 10 } }
+  };
+  if (!hasUsdt && !hasEur && !hasHuf && !hasUsd && !hasCzk) scales.y = {
     ticks: { color: '#4a5878' }, grid: { color: 'rgba(74,88,120,0.25)' }
   };
 
@@ -2806,8 +2884,8 @@ function reportYesterday() {
 }
 
 function runReport(reportDateStr) {
-  var todayStr  = reportDateStr;
-  var todayDeals = exState.deals.filter(function(d){ return d.date === todayStr; });
+  var todayStr = normalizeDealDate(reportDateStr);
+  var todayDeals = exState.deals.filter(function(d){ return normalizeDealDate(d.date) === todayStr; });
   if (!todayDeals.length) { showToast('За ' + todayStr + ' сделок нет', 'warn'); return; }
 
   // — Open round
@@ -2817,7 +2895,7 @@ function runReport(reportDateStr) {
 
   // — Closed rounds for this date
   var todayRounds = (exState.rounds2 || []).filter(function(r){
-    return r.status === 'closed' && r.closedDate === todayStr;
+    return r.status === 'closed' && normalizeDealDate(r.closedDate) === todayStr;
   });
 
   // — All agent ids
@@ -3002,7 +3080,7 @@ function runReport(reportDateStr) {
 
     // — Attribution pool P&L for today
     var todayPoolLog = (exState.poolLog || []).filter(function(e){
-      return e.type === 'consumed' && e.date === todayStr;
+      return e.type === 'consumed' && normalizeDealDate(e.date) === todayStr;
     });
     if (todayPoolLog.length) {
       var poolTotalProfit = todayPoolLog.reduce(function(s,e){ return s + (e.profit||0); }, 0);
@@ -3120,6 +3198,7 @@ document.getElementById("imp-file").addEventListener("change", function(e) {
         if (data.shState) shState = data.shState;
         if (!exState.cashflows) exState.cashflows = [];
         if (!exState.closedRounds) exState.closedRounds = [];
+        normalizeExStateDates();
         rebuildRounds();
         save();
         CURS.forEach(function(c) {
@@ -3475,14 +3554,15 @@ setTimeout(function autoLoadOnStartup() {
         note: r.note || '',
         usdtToOwner: String(r.usdttoowner||'').toLowerCase()==='1'||String(r.usdttoowner||'').toLowerCase()==='true',
         poolFlag: String(r.pool_flag||r.usdtfromowner||'').toLowerCase()==='1'||String(r.pool_flag||r.usdtfromowner||'').toLowerCase()==='true',
-        date: dateStr, time: timeStr
+        date: normalizeDealDate(dateStr), time: timeStr
       });
     });
     if (newDeals.length > 0) {
       sortDealsChronologically(newDeals);
-      // Auto-open round only for today's deals (prevents old imported data from opening stale rounds)
+      repairStaleOpenRound();
       if (!exState.openRound2) {
-        var todayNew = newDeals.filter(function(d){ return d.date === today(); });
+        var todayNorm = normalizeDealDate(today());
+        var todayNew = newDeals.filter(function(d){ return normalizeDealDate(d.date) === todayNorm; });
         if (todayNew.length > 0) autoOpenRound(todayNew[0]);
       }
       newDeals.forEach(function(d){ exState.deals.push(d); });
@@ -4343,7 +4423,7 @@ function processGsRows(rows) {
         usdtToOwner: String(r.usdttoowner || '').toLowerCase() === '1' || String(r.usdttoowner || '').toLowerCase() === 'true',
         // pool_flag — основной флаг пула; fallback на старое поле usdtFromOwner для обратной совместимости
         poolFlag: String(r.pool_flag || r.usdtfromowner || '').toLowerCase() === '1' || String(r.pool_flag || r.usdtfromowner || '').toLowerCase() === 'true',
-        date: dateStr, time: timeStr
+        date: normalizeDealDate(dateStr), time: timeStr
       }
     });
   });
@@ -4403,7 +4483,7 @@ document.getElementById('gs-confirm-btn').addEventListener('click', function() {
   });
   if (added > 0) {
     sortDealsChronologically(newDeals);
-    // Auto-open round before first deal if none is open
+    repairStaleOpenRound();
     if (!exState.openRound2 && newDeals.length > 0) {
       autoOpenRound(newDeals[0]);
     }
